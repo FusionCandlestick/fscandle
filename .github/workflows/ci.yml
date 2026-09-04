@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit Tests
+        run: npm run test:unit
+
+      - name: Smoke Test
+        run: npm run test:smoke
+
+      - name: Performance Smoke
+        run: npm run test:perf
+
+      - name: Install Playwright Browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Stability Probe
+        run: npm run build:library && npm run test:stability
+
+      - name: Security Audit
+        run: npm run audit:ci
+
+      - name: Build Library
+        run: npm run build:library
+
+      - name: Package Artifact Smoke
+        run: npm run test:package

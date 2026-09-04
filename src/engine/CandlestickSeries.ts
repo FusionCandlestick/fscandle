@@ -1,0 +1,91 @@
+import { BaseSeries } from './BaseSeries';
+import { CandlestickStyleOptions, DeepPartial } from '../types/options';
+import { CoordinateTransformer } from './CoordinateTransformer';
+import { UI_FONT_FAMILY } from '../model/fontFamily';
+
+const defaultCandleOptions: CandlestickStyleOptions = {
+  upColor: '#26a69a',
+  downColor: '#ef5350',
+  wickVisible: true,
+  borderVisible: true,
+  borderColor: '#378658',
+  borderUpColor: '#26a69a',
+  borderDownColor: '#ef5350',
+  wickColor: '#737375',
+  wickUpColor: '#26a69a',
+  wickDownColor: '#ef5350',
+};
+
+export class CandlestickSeries extends BaseSeries<CandlestickStyleOptions> {
+  constructor(options: DeepPartial<CandlestickStyleOptions> = {}) {
+    super({ ...defaultCandleOptions, ...options } as CandlestickStyleOptions);
+  }
+
+  public updateOptions(options: DeepPartial<CandlestickStyleOptions>) {
+    this._options = { ...this._options, ...options } as CandlestickStyleOptions;
+  }
+
+  public render(ctx: CanvasRenderingContext2D, transformer: CoordinateTransformer) {
+    const { upColor, downColor, wickVisible, borderVisible } = this._options;
+    const barSpacing = transformer.getBarSpacing();
+    const candleWidth = Math.max(1, barSpacing * 0.8);
+
+    // Only the bars on screen: see BaseSeries.visibleRange.
+    const { start, end } = this.visibleRange(transformer);
+    for (let i = start; i <= end; i += 1) {
+      const d = this._data[i];
+      const x = transformer.indexToX(i);
+      const openY = transformer.priceToY(d.open);
+      const closeY = transformer.priceToY(d.close);
+      const highY = transformer.priceToY(d.high);
+      const lowY = transformer.priceToY(d.low);
+      
+      const isUp = d.close >= d.open;
+      const bodyColor = isUp ? upColor : downColor;
+      const borderColor = isUp ? (this._options.borderUpColor || upColor) : (this._options.borderDownColor || downColor);
+      const wickColor = isUp ? (this._options.wickUpColor || upColor) : (this._options.wickDownColor || downColor);
+      
+      const bodyHeight = Math.abs(closeY - openY) || 1;
+      const bodyY = Math.min(openY, closeY);
+
+      // 1. Wick (Synthesized from KC's precision rendering)
+      if (wickVisible) {
+        ctx.strokeStyle = wickColor;
+        ctx.beginPath();
+        ctx.moveTo(x, highY);
+        ctx.lineTo(x, bodyY);
+        ctx.moveTo(x, bodyY + bodyHeight);
+        ctx.lineTo(x, lowY);
+        ctx.stroke();
+      }
+      
+      // 2. Body & Border (Synthesized from TV's hollow logic)
+      if (borderVisible) {
+        ctx.strokeStyle = borderColor;
+        ctx.strokeRect(x - candleWidth / 2, bodyY, candleWidth, bodyHeight);
+      }
+
+      // 3. Fill logic (Hollow if isUp and option enabled - simplified to solid for now but prepared for v1.7)
+      ctx.fillStyle = bodyColor;
+      ctx.fillRect(x - candleWidth / 2, bodyY, candleWidth, bodyHeight);
+
+      // 4. Marker rendering (New: Sentiment/Event Markers)
+      if (d.marker) {
+        ctx.font = `600 10px ${UI_FONT_FAMILY}`;
+        ctx.textAlign = 'center';
+        ctx.fillStyle = d.marker.color;
+        
+        const textY = d.marker.position === 'top' ? highY - 15 : lowY + 25;
+        const dotY = d.marker.position === 'top' ? highY - 5 : lowY + 10;
+        
+        // Draw marker dot
+        ctx.beginPath();
+        ctx.arc(x, dotY, 3, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Draw marker text
+        ctx.fillText(d.marker.text, x, textY);
+      }
+    }
+  }
+}

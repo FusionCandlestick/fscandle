@@ -1,0 +1,110 @@
+{
+  "name": "fscandle",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Free-form HTML5 Canvas K-line (candlestick) chart engine with a custom renderer, framework-neutral and React entry points, and datafeed helpers.",
+  "license": "SEE LICENSE IN LICENSE",
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "candlestick",
+    "kline",
+    "chart",
+    "charting",
+    "canvas",
+    "trading",
+    "technical-analysis",
+    "indicators",
+    "react"
+  ],
+  "homepage": "https://github.com/FusionCandlestick/fscandle#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FusionCandlestick/fscandle.git"
+  },
+  "bugs": {
+    "url": "https://github.com/FusionCandlestick/fscandle/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "docs/api.md",
+    "docs/data-source-integration.md",
+    "docs/THIRD_PARTY_NOTICES.md"
+  ],
+  "sideEffects": [
+    "*.css",
+    "**/*.css"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "import": "./dist/react.js",
+      "require": "./dist/react.cjs"
+    },
+    "./datafeed": {
+      "types": "./dist/datafeed.d.ts",
+      "import": "./dist/datafeed.js",
+      "require": "./dist/datafeed.cjs"
+    }
+  },
+  "scripts": {
+    "build:library": "tsup",
+    "prepare": "npm run build:library",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test:smoke": "node tests/smoke/source-contract-smoke.mjs",
+    "test:package": "node tests/smoke/package-artifact-smoke.mjs",
+    "test:perf": "node tests/performance/chart-engine-benchmark.mjs",
+    "test:stability": "node tests/performance/stability-probe.mjs",
+    "audit:ci": "npm audit --omit=dev --audit-level high",
+    "test": "npm run typecheck && npm run test:unit && npm run test:smoke && npm run test:perf",
+    "release:check": "npm run lint && npm run typecheck && npm run test:unit && npm run test:smoke && npm run test:perf && npm run test:stability && npm run audit:ci && npm run build:library && npm run test:package",
+    "test:unit": "rm -rf .test-build && tsc -p tsconfig.test.json && node -e \"require('fs').writeFileSync('.test-build/package.json','{\\\"type\\\":\\\"commonjs\\\"}')\" && node --test \".test-build/tests/unit/*.test.js\""
+  },
+  "dependencies": {
+    "technicalindicators": "^3.1.0"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "react-dom": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    },
+    "react-dom": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "@types/node": "^26.1.1",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.20.0"
+  },
+  "overrides": {
+    "sharp": "0.35.3"
+  }
+}

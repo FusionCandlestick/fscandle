@@ -1,0 +1,27 @@
+# dependencies
+/node_modules
+
+# build output
+/dist
+*.tsbuildinfo
+
+# unit-test build output
+.test-build/
+
+# test artifacts
+/coverage
+/test-results
+**/playwright-report/
+**/test-results/
+tests/performance/.artifacts/
+
+# upstream comparison clones (KLineCharts, Lightweight Charts) — local
+# read-only study and benchmark material, see docs/THIRD_PARTY_NOTICES.md
+/references/
+
+# env / editor / os
+.env*
+.vscode/
+.DS_Store
+*.pem
+npm-debug.log*

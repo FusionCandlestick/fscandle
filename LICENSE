@@ -1,0 +1,78 @@
+FusionCandlestick Non-Commercial Source License 1.0
+
+Copyright (c) 2026 FusionCandlestick contributors
+
+1. License Grant
+
+Subject to this License, the copyright holder (the “Licensor”) grants you a
+worldwide, royalty-free, non-exclusive, non-transferable right to access, use,
+copy, and modify the Software solely for personal, educational, academic,
+evaluation, or other non-commercial purposes.
+
+2. Commercial Use Prohibited
+
+You may not use, reproduce, modify, distribute, host, provide, sublicense, sell,
+or otherwise exploit the Software or a derivative work for Commercial Purposes
+without a separate written commercial license from the Licensor.
+
+“Commercial Purposes” includes, without limitation:
+
+(a) use by or for a for-profit organization in its business operations;
+(b) a hosted or managed service, SaaS, API, platform, product, or feature;
+(c) paid consulting, implementation, integration, support, or training;
+(d) revenue from sales, subscriptions, fees, advertising, sponsorship, or data;
+(e) use intended to obtain commercial advantage, reduce commercial operating
+    costs, support fundraising, or develop a commercial product or service; and
+(f) distribution as part of, or for use with, a commercial product or service.
+
+3. Non-Commercial Distribution
+
+You may distribute the unmodified Software or non-commercial derivative works
+only when all source code is provided, this License and all copyright notices
+are retained, modifications are prominently described, and recipients receive
+the work under this same License without additional restrictions.
+
+4. Branding and Representation
+
+This License grants no trademark rights. You may not imply endorsement by the
+Licensor, represent a modified version as an official release, remove ownership
+notices, or use the FusionCandlestick name or marks to identify a derivative
+work without prior written permission.
+
+5. Separate Permissions
+
+Commercial licenses, waivers, or exceptions are valid only when issued in
+writing by the Licensor. The Licensor may publish written clarifications of
+this License. A clarification applies prospectively and may not retroactively
+reduce rights already exercised in compliance with the text in effect at that
+time. Applicable law and a final decision of a competent court prevail over any
+clarification.
+
+6. Termination
+
+Your rights terminate automatically upon breach. They may be reinstated only by
+the Licensor in writing. Sections concerning restrictions, attribution,
+disclaimers, and liability survive termination.
+
+7. No Patent or Trademark License
+
+No patent or trademark license is granted, whether expressly, by implication,
+estoppel, or otherwise.
+
+8. Disclaimer and Limitation of Liability
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+PURPOSE, TITLE, AND NON-INFRINGEMENT. TO THE MAXIMUM EXTENT PERMITTED BY LAW,
+THE LICENSOR SHALL NOT BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY
+ARISING FROM OR RELATED TO THE SOFTWARE OR THIS LICENSE.
+
+9. Entire License and Severability
+
+This License is the entire agreement for the rights granted here. If any term is
+unenforceable, it shall be limited or removed only to the minimum extent needed,
+and the remaining terms remain effective.
+
+This is a source-available license, not an Open Source Initiative approved
+open-source license. Earlier versions received under another license remain
+governed by the license supplied with those versions.

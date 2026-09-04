@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "incremental": false,
+    "outDir": ".test-build",
+    "rootDir": ".",
+    // CommonJS output so Node resolves the source's extensionless relative
+    // imports without a bundler or a custom loader.
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "ignoreDeprecations": "6.0",
+    "jsx": "react-jsx",
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts", "tests/unit/**/*.ts"],
+  "exclude": ["node_modules", "references", "src/app/**", "src/components/**", ".next"]
+}
