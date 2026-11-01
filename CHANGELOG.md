@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- `FusionCandlestickChartComponent` trading lines (`tradingLines`) were never
+  drawn or draggable: they used an overlay type (`price_line`) that no template
+  registered. They are now a dedicated `trading_line` overlay: a full-width
+  horizontal line with a price tag (`label` is shown), draggable through
+  `onTradingLineDrag` unless `draggable: false`, which locks it.
+- Trading lines are restored after the chart is rebuilt, and removing a line
+  from `tradingLines` now removes it from the chart.
+
 ## [0.1.0] - 2026-09-04
 
 First public release, published to npm as `fscandle`. The API is not yet stable

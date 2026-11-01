@@ -5,6 +5,13 @@ import { FusionCandlestickChart } from '../../FusionCandlestickChart';
 import { KLineData } from '../../types';
 import { DeepPartial, ChartOptions } from '../../types/options';
 import { Overlay } from '../../engine/OverlayManager';
+import {
+  buildTradingLineFields,
+  isTradingLineOverlayId,
+  TRADING_LINE_OVERLAY_TYPE,
+  tradingLineOverlayId,
+  tradingLineTemplate,
+} from '../../model/tradingLineOverlay';
 
 export interface StackedPricePaneInput {
   id?: string;
@@ -52,6 +59,51 @@ export const FusionCandlestickChartComponent: React.FC<FusionCandlestickChartPro
 }) => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<FusionCandlestickChart | null>(null);
+  // Drag callbacks are attached to chart overlays once and must always reach the
+  // latest handler, so they read it through a ref rather than a stale closure.
+  const onTradingLineDragRef = useRef(onTradingLineDrag);
+  useEffect(() => {
+    onTradingLineDragRef.current = onTradingLineDrag;
+  }, [onTradingLineDrag]);
+
+  const anchorTimestamp = data.length > 0 ? data[data.length - 1].timestamp : 0;
+
+  /**
+   * Make the chart's trading-line overlays match `lines`: create missing ones,
+   * update existing ones in place, and remove ones no longer requested. Safe to
+   * call on a freshly built chart, whose persisted state may already hold them.
+   */
+  const syncTradingLines = (chart: FusionCandlestickChart, lines: TradingLineInput[] | undefined) => {
+    chart.registerOverlayTemplate(tradingLineTemplate);
+
+    const wanted = lines ?? [];
+    const wantedIds = new Set(wanted.map(line => tradingLineOverlayId(line.id)));
+    const current = chart.getOverlays();
+    current.forEach(overlay => {
+      if (isTradingLineOverlayId(overlay.id) && !wantedIds.has(overlay.id)) {
+        chart.removeOverlay(overlay.id);
+      }
+    });
+
+    wanted.forEach(line => {
+      const overlayId = tradingLineOverlayId(line.id);
+      const fields = buildTradingLineFields(line, anchorTimestamp);
+      const onDrag = (overlay: Overlay) => {
+        onTradingLineDragRef.current?.(line.id, overlay.points[0].value);
+      };
+      const existing = current.find(overlay => overlay.id === overlayId);
+
+      if (existing && existing.type === TRADING_LINE_OVERLAY_TYPE) {
+        chart.updateOverlay(overlayId, { ...fields, onPressedMoving: onDrag, onPressedMoveEnd: onDrag });
+        return;
+      }
+      // A line of this id from an older build (for example a `price_line`
+      // overlay restored from persisted state) cannot be updated into the new
+      // type, so replace it.
+      if (existing) chart.removeOverlay(overlayId);
+      chart.createOverlay({ id: overlayId, ...fields, onPressedMoving: onDrag, onPressedMoveEnd: onDrag });
+    });
+  };
 
   const buildLayerData = (source: KLineData[], multiplier: number, wave: number) => {
     return source.map((item, index) => {
@@ -139,6 +191,10 @@ export const FusionCandlestickChartComponent: React.FC<FusionCandlestickChartPro
       });
     }
 
+    // A rebuilt chart starts without its trading lines (their callbacks are not
+    // persisted), so they are restored here, not only when `tradingLines` changes.
+    syncTradingLines(mainChart, tradingLines);
+
     chartRef.current = mainChart;
     onChartReady?.(mainChart);
 
@@ -148,59 +204,12 @@ export const FusionCandlestickChartComponent: React.FC<FusionCandlestickChartPro
     };
   }, [data, options, stackedPricePanes, overlays, onChartReady]);
 
-  // Synchronize tradingLines props with chart price_line overlays
+  // Keep the chart's trading lines in step with the `tradingLines` prop.
   useEffect(() => {
     const chart = chartRef.current;
-    if (!chart || !tradingLines) return;
-
-    // Get current chart overlays
-    const existing = chart.getOverlays();
-
-    // Remove trading lines that are no longer in props
-    existing.forEach((o) => {
-      if (o.id.startsWith('trading-line-')) {
-        const id = o.id.replace('trading-line-', '');
-        if (!tradingLines.some((l) => l.id === id)) {
-          chart.removeOverlay(o.id);
-        }
-      }
-    });
-
-    // Create or update trading lines from props
-    tradingLines.forEach((line) => {
-      const overlayId = `trading-line-${line.id}`;
-      const hasOverlay = existing.some((o) => o.id === overlayId);
-
-      const overlayData = {
-        id: overlayId,
-        type: 'price_line',
-        points: [{ timestamp: 0, value: line.price }],
-        color: line.color ?? (line.type === 'position' ? '#10b981' : '#f59e0b'),
-        lineWidth: 2,
-        onPressedMoving: (ov: Overlay) => {
-          if (line.draggable !== false) {
-            onTradingLineDrag?.(line.id, ov.points[0].value);
-          }
-        },
-        onPressedMoveEnd: (ov: Overlay) => {
-          if (line.draggable !== false) {
-            onTradingLineDrag?.(line.id, ov.points[0].value);
-          }
-        }
-      };
-
-      if (hasOverlay) {
-        chart.updateOverlay(overlayId, {
-          points: overlayData.points,
-          color: overlayData.color,
-          onPressedMoving: overlayData.onPressedMoving,
-          onPressedMoveEnd: overlayData.onPressedMoveEnd
-        });
-      } else {
-        chart.createOverlay(overlayData);
-      }
-    });
-  }, [tradingLines, onTradingLineDrag]);
+    if (!chart) return;
+    syncTradingLines(chart, tradingLines);
+  }, [tradingLines]);
 
   // Synchronize active symbol changes
   useEffect(() => {
