@@ -3,15 +3,10 @@ import { describe, it } from 'node:test';
 
 import { PriceExtentCache, computePriceExtent } from '../../src/model/priceExtent';
 import type { KLineData } from '../../src/types';
+import { makeBar, MINUTE } from '../support/fixtures';
 
-const bar = (high: number, low: number, i = 0): KLineData => ({
-  timestamp: 1_600_000_000_000 + i * 60_000,
-  open: low,
-  high,
-  low,
-  close: high,
-  volume: 1,
-});
+const bar = (high: number, low: number, i = 0): KLineData =>
+  makeBar(1_600_000_000_000 + i * MINUTE, high, { open: low, high, low, volume: 1 });
 
 describe('computing a price extent', () => {
   it('finds the highest high and the lowest low', () => {

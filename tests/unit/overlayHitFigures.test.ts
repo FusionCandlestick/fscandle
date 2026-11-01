@@ -5,7 +5,7 @@ import { OverlayManager } from '../../src/engine/OverlayManager';
 import type { Overlay } from '../../src/engine/OverlayManager';
 import { CoordinateTransformer } from '../../src/engine/CoordinateTransformer';
 import { DataStore } from '../../src/store/DataStore';
-import type { KLineData } from '../../src/types';
+import { makeChartContext } from '../support/fixtures';
 
 /**
  * Hit testing for the built-in templates, which used to be a hand-written
@@ -18,26 +18,7 @@ import type { KLineData } from '../../src/types';
 const WIDTH = 1000;
 const HEIGHT = 500;
 
-function makeContext() {
-  const store = new DataStore();
-  const data: KLineData[] = Array.from({ length: 20 }, (_, i) => ({
-    timestamp: i * 60_000,
-    open: 100,
-    high: 110,
-    low: 90,
-    close: 100,
-    volume: 1,
-  }));
-  store.setData(data);
-
-  const transformer = new CoordinateTransformer();
-  transformer.setDimensions(WIDTH, HEIGHT);
-  transformer.setRange(90, 110);
-  transformer.setBarSpacing(10);
-  transformer.setOffset(0);
-
-  return { store, transformer, manager: new OverlayManager() };
-}
+const makeContext = () => ({ ...makeChartContext(WIDTH, HEIGHT), manager: new OverlayManager() });
 
 /** Pixel position of an overlay point, so tests can aim at real geometry. */
 function pixel(

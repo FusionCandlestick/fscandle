@@ -67,7 +67,7 @@
     "build:library": "tsup",
     "prepare": "npm run build:library",
     "lint": "eslint",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit",
     "test:smoke": "node tests/smoke/source-contract-smoke.mjs",
     "test:package": "node tests/smoke/package-artifact-smoke.mjs",
     "test:perf": "node tests/performance/chart-engine-benchmark.mjs",
@@ -75,7 +75,7 @@
     "audit:ci": "npm audit --omit=dev --audit-level high",
     "test": "npm run typecheck && npm run test:unit && npm run test:smoke && npm run test:perf",
     "release:check": "npm run lint && npm run typecheck && npm run test:unit && npm run test:smoke && npm run test:perf && npm run test:stability && npm run audit:ci && npm run build:library && npm run test:package",
-    "test:unit": "rm -rf .test-build && tsc -p tsconfig.test.json && node -e \"require('fs').writeFileSync('.test-build/package.json','{\\\"type\\\":\\\"commonjs\\\"}')\" && node --test \".test-build/tests/unit/*.test.js\""
+    "test:unit": "node scripts/build-tests.mjs && node --test \".test-build/tests/unit/*.test.js\""
   },
   "dependencies": {
     "technicalindicators": "^3.1.0"
@@ -97,6 +97,7 @@
     "@types/node": "^26.1.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "esbuild": "^0.27.7",
     "eslint": "^9",
     "eslint-plugin-react-hooks": "^7.1.1",
     "react": "19.2.4",

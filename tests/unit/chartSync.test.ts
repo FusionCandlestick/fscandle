@@ -3,13 +3,14 @@ import { describe, it } from 'node:test';
 
 import { planDataSync, stableSignature } from '../../src/model/chartSync';
 import type { KLineData } from '../../src/types';
+import { makeBar, MINUTE } from '../support/fixtures';
 
 function bar(timestamp: number, close = timestamp): KLineData {
-  return { timestamp, open: close, high: close, low: close, close, volume: 1 };
+  return makeBar(timestamp, close, { open: close, high: close, low: close, volume: 1 });
 }
 
 function series(count: number): KLineData[] {
-  return Array.from({ length: count }, (_, i) => bar(i * 60_000));
+  return Array.from({ length: count }, (_, i) => bar(i * MINUTE));
 }
 
 describe('planDataSync', () => {

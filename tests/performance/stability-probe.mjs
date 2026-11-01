@@ -49,7 +49,11 @@ const server = createServer((req, res) => {
 });
 await new Promise(done => server.listen(PORT, done));
 
-const browser = await chromium.launch();
+// Playwright's bundled browser is used unless FSCANDLE_CHROMIUM names another
+// Chromium binary (for example a preinstalled one in a sandboxed environment).
+const browser = await chromium.launch({
+  executablePath: process.env.FSCANDLE_CHROMIUM || undefined,
+});
 const page = await browser.newPage({ viewport: { width: 1000, height: 600 } });
 const pageErrors = [];
 page.on('pageerror', error => pageErrors.push(String(error)));

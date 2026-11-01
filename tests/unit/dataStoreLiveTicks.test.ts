@@ -3,17 +3,12 @@ import { describe, it } from 'node:test';
 
 import { DataStore } from '../../src/store/DataStore';
 import type { KLineData } from '../../src/types';
+import { makeBar } from '../support/fixtures';
 
 const HOUR = 3600000;
 
-const bar = (timestamp: number, close = 1.5): KLineData => ({
-  timestamp,
-  open: 1,
-  high: 2,
-  low: 0.5,
-  close,
-  volume: 1,
-});
+const bar = (timestamp: number, close = 1.5): KLineData =>
+  makeBar(timestamp, close, { open: 1, high: 2, low: 0.5, volume: 1 });
 
 /** What a full rebuild would have produced, for comparison. */
 const rebuiltFrom = (bars: KLineData[]) => {

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import test, { describe } from 'node:test';
+import { describe, it } from 'node:test';
 
 import { CoordinateTransformer } from '../../src/engine/CoordinateTransformer';
 import { PaneTransformers } from '../../src/engine/PaneTransformers';
@@ -12,21 +12,21 @@ const mainTransformer = () => {
 };
 
 describe('per-pane coordinate transformers', () => {
-  test('the main pane keeps using the chart transformer', () => {
+  it('the main pane keeps using the chart transformer', () => {
     const main = mainTransformer();
     const transformers = new PaneTransformers(main);
     assert.equal(transformers.for('main'), main);
     assert.equal(transformers.find('main'), main);
   });
 
-  test('a sub-pane gets its own instance, created once', () => {
+  it('a sub-pane gets its own instance, created once', () => {
     const transformers = new PaneTransformers(mainTransformer());
     const rsi = transformers.for('pane_rsi');
     assert.notEqual(rsi, transformers.for('main'));
     assert.equal(transformers.for('pane_rsi'), rsi);
   });
 
-  test('a sub-pane range does not leak into the main pane', () => {
+  it('a sub-pane range does not leak into the main pane', () => {
     const main = mainTransformer();
     const transformers = new PaneTransformers(main);
 
@@ -45,7 +45,7 @@ describe('per-pane coordinate transformers', () => {
     assert.ok(Math.abs(rsi.yToPrice(rsi.priceToY(70)) - 70) < 1e-6);
   });
 
-  test('new sub-pane transformers are configured by the owner', () => {
+  it('new sub-pane transformers are configured by the owner', () => {
     const configured: CoordinateTransformer[] = [];
     const transformers = new PaneTransformers(mainTransformer(), transformer => {
       configured.push(transformer);
@@ -61,7 +61,7 @@ describe('per-pane coordinate transformers', () => {
     assert.equal(pane.indexToX(0), 595);
   });
 
-  test('find does not create, retain forgets removed panes', () => {
+  it('find does not create, retain forgets removed panes', () => {
     const transformers = new PaneTransformers(mainTransformer());
     assert.equal(transformers.find('pane_rsi'), null);
     assert.equal(transformers.has('pane_rsi'), false);
@@ -77,7 +77,7 @@ describe('per-pane coordinate transformers', () => {
     assert.equal(transformers.has('main'), true);
   });
 
-  test('forEach visits the main transformer and every sub-pane', () => {
+  it('forEach visits the main transformer and every sub-pane', () => {
     const main = mainTransformer();
     const transformers = new PaneTransformers(main);
     transformers.for('pane_rsi');

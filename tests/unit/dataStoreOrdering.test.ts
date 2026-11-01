@@ -3,15 +3,10 @@ import { describe, it } from 'node:test';
 
 import { DataStore } from '../../src/store/DataStore';
 import type { KLineData } from '../../src/types';
+import { makeBar } from '../support/fixtures';
 
-const bar = (timestamp: number): KLineData => ({
-  timestamp,
-  open: 1,
-  high: 2,
-  low: 0.5,
-  close: 1.5,
-  volume: 1,
-});
+const bar = (timestamp: number): KLineData =>
+  makeBar(timestamp, 1.5, { open: 1, high: 2, low: 0.5, volume: 1 });
 
 describe('data ordering on setData', () => {
   it('keeps chronological input as it is', () => {

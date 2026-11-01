@@ -3,30 +3,9 @@ import { describe, it } from 'node:test';
 
 import { OverlayManager } from '../../src/engine/OverlayManager';
 import type { Overlay } from '../../src/engine/OverlayManager';
-import { CoordinateTransformer } from '../../src/engine/CoordinateTransformer';
-import { DataStore } from '../../src/store/DataStore';
-import type { KLineData } from '../../src/types';
+import { makeChartContext } from '../support/fixtures';
 
-function makeContext() {
-  const store = new DataStore();
-  const data: KLineData[] = Array.from({ length: 20 }, (_, i) => ({
-    timestamp: i * 60_000,
-    open: 100,
-    high: 110,
-    low: 90,
-    close: 100,
-    volume: 1,
-  }));
-  store.setData(data);
-
-  const transformer = new CoordinateTransformer();
-  transformer.setDimensions(1000, 500);
-  transformer.setRange(90, 110);
-  transformer.setBarSpacing(10);
-  transformer.setOffset(0);
-
-  return { store, transformer };
-}
+const makeContext = () => makeChartContext();
 
 function makeOverlay(id: string, extra: Partial<Overlay> = {}): Overlay {
   return {

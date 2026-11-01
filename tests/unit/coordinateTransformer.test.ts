@@ -2,15 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { CoordinateTransformer } from '../../src/engine/CoordinateTransformer';
-
-function makeTransformer(width = 1000, height = 500) {
-  const transformer = new CoordinateTransformer();
-  transformer.setDimensions(width, height);
-  transformer.setRange(100, 200);
-  transformer.setBarSpacing(10);
-  transformer.setOffset(0);
-  return transformer;
-}
+import { makeTransformer } from '../support/fixtures';
 
 describe('price <-> y', () => {
   it('round-trips in normal mode', () => {

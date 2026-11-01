@@ -4,22 +4,19 @@ import { describe, it } from 'node:test';
 import { DataStore } from '../../src/store/DataStore';
 import { SESSION_PRESETS } from '../../src/model/session';
 import type { KLineData } from '../../src/types';
+import { makeBar, makeBars } from '../support/fixtures';
 
 const MINUTE = 60_000;
 
-function bar(timestamp: number, close = 100): KLineData {
-  return { timestamp, open: close, high: close + 1, low: close - 1, close, volume: 10 };
-}
-
 /** `count` bars spaced `step` apart starting at `start`. */
 function series(start: number, count: number, step: number): KLineData[] {
-  return Array.from({ length: count }, (_, i) => bar(start + i * step, 100 + i));
+  return makeBars(count, { start, step });
 }
 
 describe('setData', () => {
   it('sorts by timestamp', () => {
     const store = new DataStore();
-    store.setData([bar(300), bar(100), bar(200)]);
+    store.setData([makeBar(300), makeBar(100), makeBar(200)]);
     assert.deepEqual(
       store.getData().map(item => item.timestamp),
       [100, 200, 300],
@@ -33,11 +30,11 @@ describe('setData', () => {
       calls += 1;
     });
 
-    store.setData([bar(100)]);
+    store.setData([makeBar(100)]);
     assert.equal(calls, 1);
 
     unsubscribe();
-    store.setData([bar(200)]);
+    store.setData([makeBar(200)]);
     assert.equal(calls, 1, 'unsubscribed callback must not fire again');
   });
 });
@@ -45,16 +42,16 @@ describe('setData', () => {
 describe('addData', () => {
   it('replaces a bar with a matching timestamp', () => {
     const store = new DataStore();
-    store.setData([bar(100, 10), bar(200, 20)]);
-    store.addData(bar(200, 99));
+    store.setData([makeBar(100, 10), makeBar(200, 20)]);
+    store.addData(makeBar(200, 99));
     assert.equal(store.getData().length, 2);
     assert.equal(store.getData()[1].close, 99);
   });
 
   it('inserts an out-of-order bar in the right place', () => {
     const store = new DataStore();
-    store.setData([bar(100), bar(300)]);
-    store.addData(bar(200));
+    store.setData([makeBar(100), makeBar(300)]);
+    store.addData(makeBar(200));
     assert.deepEqual(
       store.getData().map(item => item.timestamp),
       [100, 200, 300],
@@ -138,7 +135,7 @@ describe('interval detection', () => {
 
   it('defaults to one hour with fewer than two bars', () => {
     const store = new DataStore();
-    store.setData([bar(0)]);
+    store.setData([makeBar(0)]);
     assert.equal(store.getRegularInterval(), 3_600_000);
   });
 });
@@ -163,7 +160,7 @@ describe('session-aware gap handling', () => {
   }
 
   it('compresses a closure even when it is below the generic gap threshold', () => {
-    const index = midpointIndex([bar(afterCloseA), bar(afterCloseB)], true);
+    const index = midpointIndex([makeBar(afterCloseA), makeBar(afterCloseB)], true);
     // Compressed: the midpoint collapses onto a neighbouring bar instead of
     // occupying axis space proportional to the elapsed time. The snap lands
     // just inside the neighbour rather than exactly on it.
@@ -175,7 +172,7 @@ describe('session-aware gap handling', () => {
   });
 
   it('interpolates normally across the same span while the market is open', () => {
-    const index = midpointIndex([bar(duringOpenA), bar(duringOpenB)], true);
+    const index = midpointIndex([makeBar(duringOpenA), makeBar(duringOpenB)], true);
     assert.ok(
       Math.abs(index - 0.5) < 1e-6,
       `expected proportional spacing during session hours, got ${index}`,
@@ -185,8 +182,8 @@ describe('session-aware gap handling', () => {
   it('cannot tell the two spans apart without a session', () => {
     // Both spans interpolate identically when no session is declared — this
     // is the behaviour the session option exists to improve on.
-    const closed = midpointIndex([bar(afterCloseA), bar(afterCloseB)], false);
-    const open = midpointIndex([bar(duringOpenA), bar(duringOpenB)], false);
+    const closed = midpointIndex([makeBar(afterCloseA), makeBar(afterCloseB)], false);
+    const open = midpointIndex([makeBar(duringOpenA), makeBar(duringOpenB)], false);
     assert.ok(Math.abs(closed - 0.5) < 1e-6, `closed span: ${closed}`);
     assert.ok(Math.abs(open - 0.5) < 1e-6, `open span: ${open}`);
   });
@@ -199,7 +196,7 @@ describe('session-aware gap handling', () => {
     // Wed 15:30 ET (last bar of the day) to Thu 09:30 ET (first of the next).
     const wedClose = Date.UTC(2026, 2, 4, 20, 30);
     const thuOpen = Date.UTC(2026, 2, 5, 14, 30);
-    store.setData([bar(wedClose), bar(thuOpen)]);
+    store.setData([makeBar(wedClose), makeBar(thuOpen)]);
 
     // 18 hours of closure must not translate into 36 bars of empty axis.
     const midnight = Date.UTC(2026, 2, 5, 5, 0);

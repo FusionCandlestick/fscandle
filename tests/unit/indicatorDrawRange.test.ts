@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import { CoordinateTransformer } from '../../src/engine/CoordinateTransformer';
 import { Indicator, type IndicatorTemplate } from '../../src/plugins/Indicator';
 import type { KLineData } from '../../src/types';
+import { makeTransformer, recordingContext } from '../support/fixtures';
 
 const BAR_COUNT = 5000;
 const WIDTH = 600;
@@ -30,33 +31,9 @@ const dataList: KLineData[] = Array.from({ length: BAR_COUNT }, (_, i) => ({
 }));
 
 /** Counts the drawing calls a figure makes, and nothing else. */
-const recordingContext = () => {
-  const calls = { point: 0, path: 0 };
-  const noop = () => {};
-  const ctx = {
-    beginPath: () => { calls.path += 1; },
-    moveTo: () => { calls.point += 1; },
-    lineTo: () => { calls.point += 1; },
-    fillRect: () => { calls.point += 1; },
-    arc: () => { calls.point += 1; },
-    stroke: noop,
-    fill: noop,
-    lineWidth: 0,
-    strokeStyle: '',
-    fillStyle: '',
-  };
-  return { calls, ctx: ctx as unknown as CanvasRenderingContext2D };
-};
-
-const viewport = () => {
-  const transformer = new CoordinateTransformer();
-  transformer.setDimensions(WIDTH, 200);
-  transformer.setBarSpacing(BAR_SPACING);
-  transformer.setRange(0, BAR_COUNT);
-  // Park the viewport in the middle of the dataset.
-  transformer.setOffset(2500);
-  return transformer;
-};
+// Park the viewport in the middle of the dataset.
+const viewport = () =>
+  makeTransformer({ width: WIDTH, height: 200, min: 0, max: BAR_COUNT, barSpacing: BAR_SPACING, offset: 2500 });
 
 const indicatorFor = (template: IndicatorTemplate) => {
   const indicator = new Indicator('id', template);

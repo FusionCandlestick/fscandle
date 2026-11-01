@@ -4,28 +4,10 @@ import { describe, it } from 'node:test';
 import { SeriesRegistry } from '../../src/engine/SeriesRegistry';
 import { CustomSeries } from '../../src/engine/CustomSeries';
 import { StepLineSeries } from '../../src/engine/StepLineSeries';
-import { CoordinateTransformer } from '../../src/engine/CoordinateTransformer';
-import type { KLineData } from '../../src/types';
+import { makeBarsFromCloses, makeTransformer } from '../support/fixtures';
 
-function makeTransformer() {
-  const transformer = new CoordinateTransformer();
-  transformer.setDimensions(1000, 500);
-  transformer.setRange(90, 210);
-  transformer.setBarSpacing(10);
-  transformer.setOffset(0);
-  return transformer;
-}
-
-function bars(closes: number[]): KLineData[] {
-  return closes.map((close, i) => ({
-    timestamp: i * 60_000,
-    open: close,
-    high: close + 5,
-    low: close - 5,
-    close,
-    volume: 1,
-  }));
-}
+const makeRegistryTransformer = () => makeTransformer({ min: 90, max: 210 });
+const bars = makeBarsFromCloses;
 
 describe('built-in registrations', () => {
   it('registers every documented built-in type', () => {
@@ -140,7 +122,7 @@ describe('CustomSeries', () => {
 });
 
 describe('StepLineSeries.buildStepPath', () => {
-  const transformer = makeTransformer();
+  const transformer = makeRegistryTransformer();
 
   it('returns nothing for empty data', () => {
     const series = new StepLineSeries();
