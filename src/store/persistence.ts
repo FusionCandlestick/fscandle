@@ -4,13 +4,15 @@
  */
 
 import type { PriceScaleMode } from '../engine/CoordinateTransformer';
+import type { Overlay } from '../engine/OverlayManager';
 
 export const PERSISTED_STATE_VERSION = 4;
 
-interface PersistedDrawingLayer {
+/** A drawing layer as stored: complete, with its overlays. */
+export interface StoredDrawingLayer {
   id: string;
   name: string;
-  overlays: unknown[];
+  overlays: Overlay[];
   createdAt: number;
   updatedAt: number;
 }
@@ -18,7 +20,7 @@ interface PersistedDrawingLayer {
 export interface PersistedChartState {
   version: number;
   options?: Record<string, unknown>;
-  drawingLayers?: PersistedDrawingLayer[];
+  drawingLayers?: StoredDrawingLayer[];
   activeDrawingLayerId?: string;
   paneWeights?: number[];
   viewport?: { offset?: number; barSpacing?: number; yScale?: number; yOffset?: number };
@@ -38,4 +40,24 @@ export function parsePersistedState(raw: string | null): PersistedChartState | n
   } catch {
     return null;
   }
+}
+
+/**
+ * Coerce stored drawing layers into complete ones. Layers without an
+ * `overlays` array are dropped; missing ids, names and timestamps are filled in.
+ * `now` is the fallback timestamp, passed in so the result is deterministic.
+ */
+export function normalizeDrawingLayers(
+  layers: Array<Partial<StoredDrawingLayer>>,
+  now: number = Date.now(),
+): StoredDrawingLayer[] {
+  return layers
+    .filter(layer => Array.isArray(layer.overlays))
+    .map((layer, index) => ({
+      id: typeof layer.id === 'string' && layer.id ? layer.id : `layer_${now}_${index}`,
+      name: typeof layer.name === 'string' && layer.name ? layer.name : `Layer ${index + 1}`,
+      overlays: layer.overlays as Overlay[],
+      createdAt: typeof layer.createdAt === 'number' ? layer.createdAt : now,
+      updatedAt: typeof layer.updatedAt === 'number' ? layer.updatedAt : now,
+    }));
 }

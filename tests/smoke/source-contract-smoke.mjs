@@ -6,7 +6,12 @@ const root = resolve(import.meta.dirname, '../..');
 const read = path => readFileSync(resolve(root, path), 'utf8');
 
 const chart = read('src/FusionCandlestickChart.ts');
-const overlays = read('src/engine/OverlayManager.ts');
+// Overlay contracts span the manager, its public shapes, and the built-in templates.
+const overlays = [
+  'src/engine/OverlayManager.ts',
+  'src/engine/overlayTypes.ts',
+  'src/engine/builtinOverlayTemplates.ts',
+].map(read).join('\n');
 const indicators = read('src/plugins/Indicator.ts');
 const transformer = read('src/engine/CoordinateTransformer.ts');
 const publicIndex = read('src/index.ts');

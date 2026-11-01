@@ -73,10 +73,12 @@ sit in the facade:
 
 - `src/model/` — period, trading session, timezone math, time formatting, price-scale geometry (pure, no DOM)
 - `src/renderer/` — chrome rendering (watermark, crosshair, extremes, axis rails) and colour math
-- `src/gui/` — toolbar, data tooltip, series style menu, each reaching the chart only through an explicit host interface
+- `src/gui/` — toolbar, data tooltip, series style menu, each reaching the chart only through an explicit host interface; `displayLabels.ts` holds the pure label formatting
 - `src/i18n/` — translation runtime plus locale dictionaries
-- `src/store/DataStore.ts` — sorted OHLC data, logical-index conversion, subscriptions
+- `src/store/DataStore.ts` — sorted OHLC data, logical-index conversion, subscriptions; `persistence.ts` — the persisted-state contract
 - `src/engine/` — series, panes, overlays, primitives, pointer handling, event bus
+  - overlays are split across `OverlayManager.ts` (state, hit testing, rendering), `overlayTypes.ts` (public shapes), `overlayDrawing.ts` (canvas and geometry helpers), and `builtinOverlayTemplates.ts` (the shipped templates)
+  - `decorationRenderer.ts` — price lines, the last-price line, and series markers
 - `src/model/PriceScaleModel.ts` — the main price scale's mode, inversion, vertical viewport, and zoom bounds
 - `src/FusionCandlestickChart.ts` — public chart facade; pane and indicator orchestration still live here
 
@@ -84,9 +86,21 @@ sit in the facade:
 
 ```bash
 npm run build:library   # emits dist/ (ESM + CJS + .d.ts) via tsup
+npm run typecheck        # tsc over src and tests (type checking only, no output)
 npm run test             # typecheck + unit + source smoke + perf smoke
-npm run test:unit        # unit tests alone (Node's test runner, compiled via tsconfig.test.json)
+npm run test:unit        # transpile with esbuild, then Node's test runner (about 2 seconds)
 npm run release:check    # lint, typecheck, all tests, audit, bundle build, artifact smoke
+```
+
+The unit-test build is transpile-only (`scripts/build-tests.mjs`), so it is fast;
+type errors in tests are caught by `npm run typecheck`. Shared fixtures live in
+`tests/support/fixtures.ts`.
+
+The stability probe launches Playwright's bundled Chromium. Where that is not
+installed, point it at another binary:
+
+```bash
+FSCANDLE_CHROMIUM=/path/to/chromium npm run test:stability
 ```
 
 Unit tests cover period parsing, timezone boundaries, trading sessions, time

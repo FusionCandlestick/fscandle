@@ -2,7 +2,7 @@ import { KLineData, Bounding } from './types';
 import { Pane } from './engine/Pane';
 import { CoordinateTransformer, PriceScaleMode } from './engine/CoordinateTransformer';
 import { DataStore } from './store/DataStore';
-import { PERSISTED_STATE_VERSION, parsePersistedState } from './store/persistence';
+import { normalizeDrawingLayers, PERSISTED_STATE_VERSION, parsePersistedState } from './store/persistence';
 import { PriceScaleModel } from './model/PriceScaleModel';
 import { StackedPriceScales } from './engine/StackedPriceScales';
 import { PaneTransformers } from './engine/PaneTransformers';
@@ -34,7 +34,6 @@ import { visibleIndexRange } from './model/visibleRange';
 import {
   PriceLineRegistry,
   SeriesMarkerRegistry,
-  placeMarkers,
   type PriceLineInput,
   type PriceLineOptions,
   type SeriesMarker,
@@ -87,6 +86,19 @@ import {
   getPaddedPriceRange,
 } from './model/priceScaleMath';
 import { ChromeRenderer } from './renderer/ChromeRenderer';
+import {
+  renderLastPriceLine,
+  renderPriceLineLabels,
+  renderPriceLines,
+  renderSeriesMarkers,
+} from './engine/decorationRenderer';
+import {
+  formatToolbarLabel,
+  indicatorDisplayLabel,
+  overlayDisplayLabel,
+  pickSeriesColor,
+  seriesDisplayLabel,
+} from './gui/displayLabels';
 import { getAxisRailColors, isLightColor } from './renderer/colors';
 import { EventBus } from './engine/EventBus';
 import type {
@@ -313,6 +325,7 @@ export class FusionCandlestickChart {
   private _session: TradingSession | null = null;
   private _timeFormatter: TimeFormatter = new TimeFormatter({ locale: 'en-US' });
   private _i18n: I18n = new I18n();
+  private _t = (key: TranslationKey): string => this._i18n.t(key);
   private _chrome: ChromeRenderer = new ChromeRenderer(() => this._options);
   
   /**
@@ -414,9 +427,6 @@ export class FusionCandlestickChart {
     return this._paneManager.weights();
   }
   /** Pane dividers, read from their owner. */
-  private get _dividers(): HTMLDivElement[] {
-    return this._paneManager.dividers();
-  }
 
   /**
    * Owner of the price-axis gutter geometry: column width, column counts, and
@@ -427,9 +437,6 @@ export class FusionCandlestickChart {
   private _axisLayout = new AxisLayoutModel(55, 3);
 
   /** Width of one axis column. Kept as an accessor for the existing call sites. */
-  private get _yAxisWidth(): number {
-    return this._axisLayout.columnWidth;
-  }
   /** Column cap, owned by the axis layout so it cannot drift from the geometry. */
   private get _maxYAxisColumnsPerSide(): number {
     return this._axisLayout.maxColumnsPerSide;
@@ -877,10 +884,6 @@ export class FusionCandlestickChart {
     return this._axisLayout.columnBounds(side, axisIndex, height);
   }
 
-  private _getAxisAreaName(side: PaneAxisSide): 'leftYAxis' | 'rightYAxis' {
-    return side === 'left' ? 'leftYAxis' : 'rightYAxis';
-  }
-
   private _withAxisColumn(
     ctx: CanvasRenderingContext2D,
     side: PaneAxisSide,
@@ -1017,10 +1020,6 @@ export class FusionCandlestickChart {
     const state = this._priceScaleFor(paneId);
     transformer.setYScale(state.scale);
     transformer.setYOffset(state.offset);
-  }
-
-  private _setPaneYOffset(paneId: string, nextOffset: number) {
-    this._priceScaleFor(paneId).offset = nextOffset;
   }
 
   /**
@@ -1278,7 +1277,6 @@ export class FusionCandlestickChart {
     return { index: bestMatch.index, time: bestMatch.time, price: bestMatch.price };
   }
 
-
   private _getSeriesStyle(series: BaseSeries | null): ConfigurablePriceSeriesStyle | null {
     if (!series) return null;
     if (series instanceof CandlestickSeries) return 'candle';
@@ -1294,31 +1292,6 @@ export class FusionCandlestickChart {
 
   private _createSeriesByStyle(style: SeriesType, options: Record<string, unknown> = {}) {
     return SeriesRegistry.createSeries(style, options);
-  }
-
-  private _getVisibleRangeForData(realWidth: number, data: KLineData[]) {
-    let min = Infinity;
-    let max = -Infinity;
-    const { leftIdx, rightIdx } = this._visibleIndexRange(this._coordinateTransformer, realWidth, data.length);
-
-    for (let i = leftIdx; i <= rightIdx; i++) {
-      const item = data[i];
-      if (!item) continue;
-      min = Math.min(min, item.low, item.open, item.close, item.high);
-      max = Math.max(max, item.low, item.open, item.close, item.high);
-    }
-
-    if (!Number.isFinite(min) || !Number.isFinite(max)) {
-      return { min: 0, max: 100 };
-    }
-
-    return { min, max };
-  }
-
-  private _getVisibleRangeForStackedPane(paneId: string, realWidth: number) {
-    const data = this._getPanePriceData(paneId);
-    if (data.length === 0) return { min: 0, max: 100 };
-    return this._getVisibleRangeForData(realWidth, data);
   }
 
   private _getPaneLocalX(containerX: number) {
@@ -1466,10 +1439,6 @@ export class FusionCandlestickChart {
         console.warn('timeScale visible logical range callback failed', error);
       }
     });
-  }
-
-  private _getDefaultPaneWeight() {
-    return 1;
   }
 
   public addStackedPricePane(config: StackedPaneConfig) {
@@ -2668,134 +2637,6 @@ export class FusionCandlestickChart {
   }
 
   /**
-   * Caller-owned horizontal lines across the plot.
-   *
-   * Their axis labels are drawn with the axis columns rather than here, so a
-   * label lands in the gutter of the scale it belongs to and is clipped by it.
-   */
-  private _renderPriceLines(
-    ctx: CanvasRenderingContext2D,
-    width: number,
-    transformer: CoordinateTransformer,
-  ): void {
-    const lines = this._priceLines.all();
-    if (lines.length === 0) return;
-
-    ctx.save();
-    for (const line of lines) {
-      const y = transformer.priceToY(line.price);
-      if (!Number.isFinite(y)) continue;
-      ctx.strokeStyle = line.color;
-      ctx.lineWidth = line.lineWidth;
-      ctx.setLineDash(line.lineStyle === 'dashed' ? [6, 4] : line.lineStyle === 'dotted' ? [1, 3] : []);
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(width, y);
-      ctx.stroke();
-    }
-    ctx.setLineDash([]);
-    ctx.restore();
-  }
-
-  /** Render last price horizontal extension line across the entire plot. */
-  private _renderLastPriceLine(
-    ctx: CanvasRenderingContext2D,
-    width: number,
-    transformer: CoordinateTransformer,
-    data: KLineData[],
-  ): void {
-    if (data.length === 0) return;
-    const last = data[data.length - 1];
-    const y = transformer.priceToY(last.close);
-    if (!Number.isFinite(y)) return;
-
-    ctx.save();
-    const color = last.close >= last.open ? '#26a69a' : '#ef5350';
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(width, y);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.restore();
-  }
-
-  /** Price-axis labels for the caller's price lines, inside one axis column. */
-  private _renderPriceLineLabels(
-    ctx: CanvasRenderingContext2D,
-    bounds: Bounding,
-    side: PaneAxisSide,
-    transformer: CoordinateTransformer,
-  ): void {
-    for (const line of this._priceLines.all()) {
-      if (!line.axisLabelVisible) continue;
-      const y = transformer.priceToY(line.price);
-      if (!Number.isFinite(y) || y < 0 || y > bounds.height) continue;
-      this._yAxis.renderLabel(ctx, y, line.title || this._formatPriceValue(line.price), bounds, side, line.color);
-    }
-  }
-
-  /**
-   * Per-bar glyphs.
-   *
-   * Placement is `placeMarkers`, which drops anything outside the visible slice
-   * before any drawing happens: a few hundred markers on a 50,000-bar chart
-   * should cost a frame nothing when none of them are on screen.
-   */
-  private _renderSeriesMarkers(
-    ctx: CanvasRenderingContext2D,
-    data: KLineData[],
-    transformer: CoordinateTransformer,
-  ): void {
-    const markers = this._seriesMarkers.all();
-    if (markers.length === 0 || data.length === 0) return;
-
-    const visible = visibleIndexRange(x => transformer.xToIndex(x), transformer.getWidth(), data.length);
-    const placed = placeMarkers(
-      markers,
-      data,
-      visible,
-      index => transformer.indexToX(index),
-      price => transformer.priceToY(price),
-    );
-    if (placed.length === 0) return;
-
-    ctx.save();
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.font = `400 10px ${this._options.layout.fontFamily}`;
-    for (const { marker, x, y } of placed) {
-      ctx.fillStyle = marker.color;
-      ctx.strokeStyle = marker.color;
-      const size = marker.size;
-
-      if (marker.shape === 'square') {
-        ctx.fillRect(x - size / 2, y - size / 2, size, size);
-      } else if (marker.shape === 'arrowUp' || marker.shape === 'arrowDown') {
-        const direction = marker.shape === 'arrowUp' ? -1 : 1;
-        ctx.beginPath();
-        ctx.moveTo(x, y + direction * size);
-        ctx.lineTo(x - size * 0.7, y - direction * size * 0.4);
-        ctx.lineTo(x + size * 0.7, y - direction * size * 0.4);
-        ctx.closePath();
-        ctx.fill();
-      } else {
-        ctx.beginPath();
-        ctx.arc(x, y, size / 2, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      if (marker.text) {
-        const offset = marker.position === 'belowBar' ? size + 20 : -(size + 20);
-        ctx.fillText(marker.text, x, y + offset);
-      }
-    }
-    ctx.restore();
-  }
-
-  /**
    * Build the toolbar, loading its code only if it is going to be shown.
    *
    * `ToolbarWidget` is the largest thing in `src/gui/` at 508 lines, and it is
@@ -2930,13 +2771,6 @@ export class FusionCandlestickChart {
    * chart-content pixel space (the same space overlays are drawn in).
    */
   /** Client coordinates → chart-content pixel space (the overlay drawing space). */
-  private _toChartContentPoint(clientX: number, clientY: number): { x: number; y: number } {
-    const rect = this._container.getBoundingClientRect();
-    return {
-      x: clientX - rect.left - this._leftYAxisWidth,
-      y: clientY - rect.top - (this._toolbarHeight + this._xAxisHeight),
-    };
-  }
 
   private _buildMouseEventParams(
     x: number,
@@ -3375,19 +3209,6 @@ export class FusionCandlestickChart {
     this._drawingFixedPointCount = 0;
   }
 
-  private _normalizeDrawingLayers(layers: Partial<DrawingLayer>[]): DrawingLayer[] {
-    const now = Date.now();
-    return layers
-      .filter(layer => Array.isArray(layer.overlays))
-      .map((layer, index) => ({
-        id: typeof layer.id === 'string' && layer.id ? layer.id : `layer_${now}_${index}`,
-        name: typeof layer.name === 'string' && layer.name ? layer.name : `Layer ${index + 1}`,
-        overlays: layer.overlays as Overlay[],
-        createdAt: typeof layer.createdAt === 'number' ? layer.createdAt : now,
-        updatedAt: typeof layer.updatedAt === 'number' ? layer.updatedAt : now,
-      }));
-  }
-
   public saveState() {
     if (!this._options.persistence.enabled) return;
     try {
@@ -3427,7 +3248,7 @@ export class FusionCandlestickChart {
             this._applyStructuralOptions();
         }
         if (Array.isArray(state.drawingLayers)) {
-            const layers = this._normalizeDrawingLayers(state.drawingLayers as Partial<DrawingLayer>[]);
+            const layers = normalizeDrawingLayers(state.drawingLayers as Partial<DrawingLayer>[]);
             if (layers.length > 0) {
               this._drawingLayers = layers;
               this._activeDrawingLayerId = layers.some(layer => layer.id === state.activeDrawingLayerId)
@@ -3882,7 +3703,6 @@ export class FusionCandlestickChart {
     });
   }
 
-
   /**
    * Request a redraw.
    *
@@ -4317,10 +4137,10 @@ export class FusionCandlestickChart {
       });
 
       if (this._options.axis.lastPriceLineVisible !== false) {
-        this._renderLastPriceLine(ctx, realWidth, primaryScale.transformer, data);
+        renderLastPriceLine(ctx, realWidth, primaryScale.transformer, data);
       }
-      this._renderPriceLines(ctx, realWidth, primaryScale.transformer);
-      this._renderSeriesMarkers(ctx, data, primaryScale.transformer);
+      renderPriceLines(ctx, realWidth, primaryScale.transformer, this._priceLines.all());
+      renderSeriesMarkers(ctx, data, primaryScale.transformer, this._seriesMarkers.all(), this._options.layout.fontFamily);
       if (this._options.axis.showExtremes !== false) {
         this._chrome.drawExtremes(ctx, {
           data,
@@ -4378,7 +4198,7 @@ export class FusionCandlestickChart {
         // Left axis overlay: live percentage labels for all series
         const leftOverlayCtx = contexts.leftAxisOverlay;
         this._withAxisColumn(leftOverlayCtx, 'left', 0, realHeight, axisBounds => {
-          this._renderPriceLineLabels(leftOverlayCtx, axisBounds, 'left', primaryScale.transformer);
+          renderPriceLineLabels(leftOverlayCtx, axisBounds, 'left', primaryScale.transformer, this._priceLines.all(), this._yAxis, price => this._formatPriceValue(price));
           // Render live tag for main series
           const mainData = this._dataStore.getData();
           if (mainData.length > 0) {
@@ -4447,7 +4267,7 @@ export class FusionCandlestickChart {
           this._withAxisColumn(axisOverlayCtx, scale.side, scale.axisIndex, realHeight, axisBounds => {
             this._renderLastPriceTag(axisOverlayCtx, axisBounds, scale.id, scale.side, scale.transformer);
             if (scale.isPrimary) {
-              this._renderPriceLineLabels(axisOverlayCtx, axisBounds, scale.side, scale.transformer);
+              renderPriceLineLabels(axisOverlayCtx, axisBounds, scale.side, scale.transformer, this._priceLines.all(), this._yAxis, price => this._formatPriceValue(price));
               // Render live price tags for all secondary series on main pane
               this._series
                 .filter(s => s !== this._mainSeries)
@@ -4618,7 +4438,6 @@ export class FusionCandlestickChart {
     });
   }
 
-
   /**
    * A rule where the trading day changes, so a multi-session sparkline does not
    * read as one continuous run. Which bars start a day is `findSessionBoundaries`'
@@ -4659,61 +4478,6 @@ export class FusionCandlestickChart {
     }
     ctx.setLineDash([]);
     ctx.restore();
-  }
-
-  private _renderWatermark(ctx: CanvasRenderingContext2D, width: number, height: number) {
-    const watermark = this._options.watermark;
-    if (!watermark?.visible || !watermark.text) return;
-    ctx.save();
-    ctx.font = `bold ${watermark.fontSize}px ${watermark.fontFamily}`;
-    ctx.fillStyle = watermark.color;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(watermark.text, width / 2, height / 2);
-    ctx.restore();
-  }
-
-  private _renderExtremes(ctx: CanvasRenderingContext2D) {
-    const data = this._dataStore.getData();
-    if (data.length === 0) return;
-    const { leftIdx: leftIndex, rightIdx: rightIndex } = this._visibleIndexRange(this._coordinateTransformer, this._container.clientWidth, data.length);
-    let highest = -Infinity, lowest = Infinity, highIndex = -1, lowIndex = -1;
-    for (let index = leftIndex; index <= rightIndex; index += 1) {
-      if (data[index].high > highest) { highest = data[index].high; highIndex = index; }
-      if (data[index].low < lowest) { lowest = data[index].low; lowIndex = index; }
-    }
-    if (highIndex !== -1) this._drawExtremeLabel(ctx, this._coordinateTransformer.indexToX(highIndex), this._coordinateTransformer.priceToY(highest), this._formatPriceValue(highest), 'up');
-    if (lowIndex !== -1) this._drawExtremeLabel(ctx, this._coordinateTransformer.indexToX(lowIndex), this._coordinateTransformer.priceToY(lowest), this._formatPriceValue(lowest), 'down');
-  }
-
-  private _drawExtremeLabel(ctx: CanvasRenderingContext2D, x: number, y: number, text: string, direction: 'up' | 'down') {
-    ctx.font = `400 10px ${this._options.layout.fontFamily}`;
-    ctx.fillStyle = this._options.layout.textColor;
-    const rightHalf = x > this._container.clientWidth / 2;
-    ctx.textAlign = rightHalf ? 'right' : 'left';
-    const textX = rightHalf ? x - 10 : x + 10;
-    ctx.beginPath();
-    ctx.strokeStyle = this._options.layout.textColor;
-    ctx.setLineDash([2, 2]);
-    ctx.lineWidth = 0.5;
-    ctx.moveTo(x, y); ctx.lineTo(textX, y);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.fillText(text, textX, direction === 'up' ? y - 20 : y + 24);
-  }
-
-  private _renderCrosshair(ctx: CanvasRenderingContext2D, width: number, height: number, pos: { x: number, y: number }) {
-    const { color, width: lineWidth, style } = this._options.crosshair;
-    ctx.strokeStyle = color;
-    ctx.lineWidth = lineWidth;
-    if (style === 'dashed') ctx.setLineDash([4, 4]);
-    const { x, y } = pos;
-    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, height); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke();
-    ctx.fillStyle = color;
-    ctx.setLineDash([]);
-    ctx.beginPath(); ctx.arc(x, y, 2.5, 0, Math.PI * 2); ctx.fill();
-    ctx.setLineDash([]);
   }
 
   /** Fill a y-axis column canvas with a tinted background and an inner border line. */
@@ -4760,18 +4524,6 @@ export class FusionCandlestickChart {
     ctx.restore();
   }
 
-  private _renderCrosshairLabels(ctx: CanvasRenderingContext2D, bounding: Bounding, pos: { x: number, y: number }, isBottomPane: boolean) {
-    const { x, y } = pos;
-    const price = this._coordinateTransformer.yToPrice(y);
-    this._yAxis.renderLabel(ctx, y, this._formatPriceValue(price), bounding, 'right');
-    
-    if (isBottomPane) {
-        const timestamp = this._coordinateTransformer.xToTimestamp(x, this._dataStore);
-        const timeText = timestamp ? this._formatTimeValue(timestamp, 'crosshair') : '';
-        this._xAxis.renderLabel(ctx, x, timeText, bounding, 'bottom');
-    }
-  }
-
   private _updateLegends() {
     this._updateDataTooltipWidget();
     this._legendWidget?.render();
@@ -4800,7 +4552,7 @@ export class FusionCandlestickChart {
           series.push({
             kind: 'main',
             id: 'main',
-            label: this._getSeriesDisplayLabel(this._mainSeries),
+            label: seriesDisplayLabel(this._mainSeries, this._t),
             bar: hovered,
             upColor: '#26a69a',
             downColor: '#ef5350',
@@ -4814,10 +4566,10 @@ export class FusionCandlestickChart {
           series.push({
             kind: 'stacked',
             id,
-            label: this._formatToolbarLabel(id),
+            label: formatToolbarLabel(id),
             bar,
-            upColor: _seriesColor(options.borderUpColor, options.upColor),
-            downColor: _seriesColor(options.borderDownColor, options.downColor),
+            upColor: pickSeriesColor(options.borderUpColor, options.upColor),
+            downColor: pickSeriesColor(options.borderDownColor, options.downColor),
             hidden: this._hiddenSeriesIds.has(id),
           });
         });
@@ -4864,7 +4616,6 @@ export class FusionCandlestickChart {
     this.removeStackedPricePane(id);
   }
 
-
   private addPane(id: string, side: PaneAxisSide = 'right'): Pane {
     const pane = this._paneManager.addPane(id, side);
 
@@ -4887,7 +4638,6 @@ export class FusionCandlestickChart {
     if (paneIndex <= 0) return;
 
     this._paneManager.removePane(paneId);
-
 
     this._interaction.forgetPane(paneId);
     this._invalidation.forgetPane(paneId);
@@ -5061,7 +4811,7 @@ export class FusionCandlestickChart {
     const extraRows: Array<[string, string]> = [];
     this._stackedScales.forEach(({ id, data: seriesData }) => {
       const item = seriesData[index];
-      if (item) extraRows.push([this._formatToolbarLabel(id), this._formatPriceValue(item.close)]);
+      if (item) extraRows.push([formatToolbarLabel(id), this._formatPriceValue(item.close)]);
     });
 
     this._dataTooltip?.update({
@@ -5081,38 +4831,6 @@ export class FusionCandlestickChart {
    * Translated name for an overlay type, falling back to title-casing the raw
    * type so custom overlay templates still get a readable label.
    */
-  private _getOverlayDisplayLabel(type: string) {
-    const key = `overlay.${type}` as TranslationKey;
-    const translated = this._i18n.t(key);
-    return translated === key ? this._formatToolbarLabel(type) : translated;
-  }
-
-  private _formatToolbarLabel(value: string) {
-    const normalized = value.replace(/_/g, ' ').trim();
-    if (/^[a-z]{1,5}$/i.test(normalized)) {
-      return normalized.toUpperCase();
-    }
-    return normalized.replace(/\b\w/g, char => char.toUpperCase());
-  }
-
-  private _getSeriesDisplayLabel(series: BaseSeries) {
-    if (series instanceof CandlestickSeries) return this._i18n.t('series.candle');
-    if (series instanceof HollowCandlestickSeries) return this._i18n.t('series.hollowCandles');
-    if (series instanceof HeikinAshiSeries) return this._i18n.t('series.ha');
-    if (series instanceof BarSeries) return this._i18n.t('series.bar');
-    if (series instanceof AreaSeries) return this._i18n.t('series.area');
-    if (series instanceof BaselineSeries) return this._i18n.t('series.baseline');
-    if (series instanceof StepLineSeries) return this._i18n.t('series.step');
-    if (series instanceof LineSeries) return this._i18n.t('series.line');
-    if (series instanceof VolumeSeries) return this._i18n.t('series.volume');
-    return this._formatToolbarLabel(series.constructor.name.replace(/Series$/, ''));
-  }
-
-  private _getIndicatorDisplayLabel(indicator: Indicator) {
-    const numericParams = indicator.template.calcParams.filter(param => typeof param === 'number');
-    if (numericParams.length === 0) return indicator.template.shortName;
-    return `${indicator.template.shortName} ${numericParams.join('/')}`;
-  }
 
   private _getToolbarContentItems(): ToolbarContentItem[] {
     const items: ToolbarContentItem[] = [];
@@ -5121,7 +4839,7 @@ export class FusionCandlestickChart {
       items.push({
         kind: 'series',
         id: String(index),
-        label: this._getSeriesDisplayLabel(series),
+        label: seriesDisplayLabel(series, this._t),
         color: series === this._mainSeries ? '#2962FF' : this._options.layout.textColor,
       });
     });
@@ -5131,7 +4849,7 @@ export class FusionCandlestickChart {
       items.push({
         kind: 'stacked',
         id,
-        label: this._formatToolbarLabel(id),
+        label: formatToolbarLabel(id),
         color: typeof seriesOptions.borderUpColor === 'string'
           ? seriesOptions.borderUpColor
           : typeof seriesOptions.lineColor === 'string'
@@ -5148,7 +4866,7 @@ export class FusionCandlestickChart {
           kind: 'indicator',
           id: indicator.id,
           paneId: pane.getId(),
-          label: this._getIndicatorDisplayLabel(indicator),
+          label: indicatorDisplayLabel(indicator),
           color: '#FF9800',
         });
       });
@@ -5158,7 +4876,7 @@ export class FusionCandlestickChart {
       items.push({
         kind: 'overlay',
         id: overlay.id,
-        label: this._getOverlayDisplayLabel(overlay.type),
+        label: overlayDisplayLabel(overlay.type, this._t),
         color: overlay.color || this._options.layout.textColor,
       });
     });
@@ -5190,7 +4908,7 @@ export class FusionCandlestickChart {
     const parsed = JSON.parse(json);
     this._saveHistory();
     if (Array.isArray(parsed.drawingLayers)) {
-      const layers = this._normalizeDrawingLayers(parsed.drawingLayers);
+      const layers = normalizeDrawingLayers(parsed.drawingLayers);
       if (layers.length === 0) throw new Error('Invalid format');
       this._drawingLayers = layers;
       this._activeDrawingLayerId = layers.some(layer => layer.id === parsed.activeDrawingLayerId)
@@ -5213,9 +4931,3 @@ export class FusionCandlestickChart {
 
 
 /** First defined color wins; series types name their up/down colors differently. */
-function _seriesColor(...candidates: Array<unknown>): string {
-  for (const candidate of candidates) {
-    if (typeof candidate === 'string') return candidate;
-  }
-  return '#ffffff';
-}
