@@ -3,7 +3,7 @@
 import React, { useEffect, useRef } from 'react';
 import { FusionCandlestickChart } from '../../FusionCandlestickChart';
 import { KLineData } from '../../types';
-import { DeepPartial, ChartOptions } from '../../types/options';
+import { DeepPartial, ChartOptions, defaultOptions } from '../../types/options';
 import { Overlay } from '../../engine/OverlayManager';
 import {
   buildTradingLineFields,
@@ -12,6 +12,7 @@ import {
   tradingLineOverlayId,
   tradingLineTemplate,
 } from '../../model/tradingLineOverlay';
+import { planDataSync, stableSignature } from '../../model/chartSync';
 
 export interface StackedPricePaneInput {
   id?: string;
@@ -32,17 +33,127 @@ export interface TradingLineInput {
 
 export interface FusionCandlestickChartProps {
   data: KLineData[];
+  /**
+   * Chart options. Changes are applied to the live chart with `applyOptions`,
+   * so keys removed from this object keep their last value. Memoise it if it is
+   * built inline, to avoid redundant work on every render.
+   */
   options?: DeepPartial<ChartOptions>;
+  /**
+   * Stacked price panes, reconciled by `id` (or position when `id` is absent).
+   * Memoise the array and each `data` array, or they are re-applied on every render.
+   */
   stackedPricePanes?: StackedPricePaneInput[];
+  /**
+   * Overlays owned by the caller, reconciled by `id`. Overlays the user draws
+   * are not touched. Give each overlay a stable `id`; without one, its position
+   * in the array is used. Memoise the array.
+   */
   overlays?: Array<Overlay | (Omit<Overlay, 'id'> & { id?: string })>;
   className?: string;
   style?: React.CSSProperties;
+  /** Called once per mounted chart. The chart instance stays the same across prop changes. */
   onChartReady?: (chart: FusionCandlestickChart) => void;
+  /**
+   * Key under which the chart stores its drawings and layout in localStorage.
+   * Every chart on a page needs a different key; a shared key makes charts
+   * overwrite each other's state.
+   */
+  persistenceKey?: string;
 
-  // ── Extended props to expose customization slots to component users ──
   symbol?: string;
   tradingLines?: TradingLineInput[];
   onTradingLineDrag?: (id: string, nextPrice: number) => void;
+}
+
+const THEME_BACKGROUND = '#131722';
+const THEME_TEXT = '#d1d4dc';
+const PROP_OVERLAY_PREFIX = 'prop-overlay-';
+
+/** Mounted charts per persistence key, to warn when two would share state. */
+const mountedPersistenceKeys = new Map<string, number>();
+
+function acquirePersistenceKey(key: string) {
+  const count = (mountedPersistenceKeys.get(key) ?? 0) + 1;
+  mountedPersistenceKeys.set(key, count);
+  if (count > 1) {
+    console.warn(
+      `[fscandle] ${count} charts share the persistence key "${key}". They will overwrite each other's saved state. Pass a unique persistenceKey to each chart.`,
+    );
+  }
+}
+
+function releasePersistenceKey(key: string) {
+  const count = (mountedPersistenceKeys.get(key) ?? 1) - 1;
+  if (count <= 0) mountedPersistenceKeys.delete(key);
+  else mountedPersistenceKeys.set(key, count);
+}
+
+/**
+ * Options for the constructor. Caller options win; the dark theme only fills in
+ * what the caller did not set, including inside `layout`.
+ */
+function constructorOptions(
+  options: DeepPartial<ChartOptions> | undefined,
+  persistenceKey: string,
+): DeepPartial<ChartOptions> {
+  return {
+    ...options,
+    layout: {
+      background: { color: THEME_BACKGROUND },
+      textColor: THEME_TEXT,
+      ...options?.layout,
+    },
+    persistence: {
+      ...options?.persistence,
+      key: options?.persistence?.key ?? persistenceKey,
+    },
+  };
+}
+
+/**
+ * Make the chart's trading-line overlays match `lines`: create missing ones,
+ * update existing ones in place, and remove ones no longer requested. Safe on a
+ * freshly built chart, whose persisted state may already hold them.
+ */
+function syncTradingLines(
+  chart: FusionCandlestickChart,
+  lines: TradingLineInput[] | undefined,
+  anchorTimestamp: number,
+  onDrag: (id: string, price: number) => void,
+) {
+  chart.registerOverlayTemplate(tradingLineTemplate);
+
+  const wanted = lines ?? [];
+  const wantedIds = new Set(wanted.map(line => tradingLineOverlayId(line.id)));
+  const current = chart.getOverlays();
+  current.forEach(overlay => {
+    if (isTradingLineOverlayId(overlay.id) && !wantedIds.has(overlay.id)) {
+      chart.removeOverlay(overlay.id);
+    }
+  });
+
+  wanted.forEach(line => {
+    const overlayId = tradingLineOverlayId(line.id);
+    const fields = buildTradingLineFields(line, anchorTimestamp);
+    const handler = (overlay: Overlay) => onDrag(line.id, overlay.points[0].value);
+    const callbacks = { onPressedMoving: handler, onPressedMoveEnd: handler };
+    const existing = current.find(overlay => overlay.id === overlayId);
+
+    if (existing && existing.type === TRADING_LINE_OVERLAY_TYPE) {
+      chart.updateOverlay(overlayId, { ...fields, ...callbacks });
+      return;
+    }
+    // A line of this id from an older build (for example a `price_line` overlay
+    // restored from persisted state) cannot be updated into the new type.
+    if (existing) chart.removeOverlay(overlayId);
+    chart.createOverlay({ id: overlayId, ...fields, ...callbacks });
+  });
+}
+
+interface ManagedStackedPane {
+  signature: string;
+  data: KLineData[];
 }
 
 export const FusionCandlestickChartComponent: React.FC<FusionCandlestickChartProps> = ({
@@ -53,178 +164,177 @@ export const FusionCandlestickChartComponent: React.FC<FusionCandlestickChartPro
   className,
   style,
   onChartReady,
+  persistenceKey,
   symbol,
   tradingLines,
   onTradingLineDrag,
 }) => {
-  const chartContainerRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<FusionCandlestickChart | null>(null);
-  // Drag callbacks are attached to chart overlays once and must always reach the
-  // latest handler, so they read it through a ref rather than a stale closure.
-  const onTradingLineDragRef = useRef(onTradingLineDrag);
+
+  // Latest props for code that runs once (mount) or from chart callbacks, which
+  // must not capture a stale closure.
+  const latest = useRef({ options, onChartReady, onTradingLineDrag, persistenceKey, symbol });
+  const dataRef = useRef<KLineData[] | null>(null);
+  const optionsSignatureRef = useRef('');
+  const stackedRef = useRef(new Map<string, ManagedStackedPane>());
+  const overlaysRef = useRef<{ ids: Set<string> } | null>(null);
+
   useEffect(() => {
-    onTradingLineDragRef.current = onTradingLineDrag;
-  }, [onTradingLineDrag]);
+    latest.current = { options, onChartReady, onTradingLineDrag, persistenceKey, symbol };
+  });
 
-  const anchorTimestamp = data.length > 0 ? data[data.length - 1].timestamp : 0;
+  // Create the chart once per mount. Everything else is applied to it below.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
 
-  /**
-   * Make the chart's trading-line overlays match `lines`: create missing ones,
-   * update existing ones in place, and remove ones no longer requested. Safe to
-   * call on a freshly built chart, whose persisted state may already hold them.
-   */
-  const syncTradingLines = (chart: FusionCandlestickChart, lines: TradingLineInput[] | undefined) => {
-    chart.registerOverlayTemplate(tradingLineTemplate);
+    const { options: initialOptions, onChartReady: ready, persistenceKey: keyProp } = latest.current;
+    const key = initialOptions?.persistence?.key ?? keyProp ?? defaultOptions.persistence.key;
+    acquirePersistenceKey(key);
 
-    const wanted = lines ?? [];
-    const wantedIds = new Set(wanted.map(line => tradingLineOverlayId(line.id)));
-    const current = chart.getOverlays();
-    current.forEach(overlay => {
-      if (isTradingLineOverlayId(overlay.id) && !wantedIds.has(overlay.id)) {
+    const chart = new FusionCandlestickChart(container, constructorOptions(initialOptions, key));
+    // The main series must exist before stacked panes are added: without it, the
+    // main price range follows the first stacked series instead of the candles.
+    chart.addCandlestickSeries();
+    // Restored state can override what the caller passed. Re-apply the caller's
+    // options so that props win over saved state.
+    chart.applyOptions(initialOptions ?? {});
+
+    chartRef.current = chart;
+    dataRef.current = null;
+    stackedRef.current = new Map();
+    overlaysRef.current = null;
+    optionsSignatureRef.current = stableSignature(initialOptions);
+
+    ready?.(chart);
+
+    return () => {
+      chartRef.current = null;
+      chart.destroy();
+      releasePersistenceKey(key);
+    };
+  }, []);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    const signature = stableSignature(options);
+    if (signature === optionsSignatureRef.current) return;
+    optionsSignatureRef.current = signature;
+    chart.applyOptions(options ?? {});
+  }, [options]);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    const plan = planDataSync(dataRef.current, data);
+    dataRef.current = data;
+    if (plan.kind === 'set') {
+      chart.setData(plan.data);
+    } else if (plan.kind === 'upsert') {
+      plan.bars.forEach(bar => chart.updateData(bar));
+    }
+  }, [data]);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    const managed = stackedRef.current;
+    const panes = (stackedPricePanes ?? []).map((pane, index) => ({
+      id: pane.id ?? `stacked-${index}`,
+      pane,
+    }));
+    const wantedIds = new Set(panes.map(entry => entry.id));
+
+    for (const id of [...managed.keys()]) {
+      if (!wantedIds.has(id)) {
+        chart.removeStackedPricePane(id);
+        managed.delete(id);
+      }
+    }
+
+    panes.forEach(({ id, pane }) => {
+      const signature = stableSignature({ side: pane.side, style: pane.style, options: pane.options });
+      const entry = managed.get(id);
+
+      if (entry && entry.signature === signature) {
+        if (entry.data !== pane.data) {
+          chart.setStackedPaneData(id, pane.data);
+          entry.data = pane.data;
+        }
+        return;
+      }
+
+      if (entry) chart.removeStackedPricePane(id);
+      const created = chart.addStackedPricePane({
+        id,
+        data: pane.data,
+        side: pane.side,
+        style: pane.style ?? 'candle',
+        options: pane.options,
+      });
+      if (created) managed.set(id, { signature, data: pane.data });
+      else managed.delete(id);
+    });
+  }, [stackedPricePanes]);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+
+    const wanted = (overlays ?? []).map((overlay, index) => ({
+      ...overlay,
+      id: overlay.id ?? `${PROP_OVERLAY_PREFIX}${index}`,
+    })) as Overlay[];
+    const wantedIds = new Set(wanted.map(overlay => overlay.id));
+    const previous = overlaysRef.current;
+
+    // Drop overlays this prop used to provide, and any index-named leftovers from a
+    // restored state that the prop no longer provides.
+    const existing = chart.getOverlays();
+    existing.forEach(overlay => {
+      const ownedBefore = previous?.ids.has(overlay.id) ?? false;
+      const indexNamed = overlay.id.startsWith(PROP_OVERLAY_PREFIX);
+      if ((ownedBefore || indexNamed) && !wantedIds.has(overlay.id)) {
         chart.removeOverlay(overlay.id);
       }
     });
 
-    wanted.forEach(line => {
-      const overlayId = tradingLineOverlayId(line.id);
-      const fields = buildTradingLineFields(line, anchorTimestamp);
-      const onDrag = (overlay: Overlay) => {
-        onTradingLineDragRef.current?.(line.id, overlay.points[0].value);
-      };
-      const existing = current.find(overlay => overlay.id === overlayId);
-
-      if (existing && existing.type === TRADING_LINE_OVERLAY_TYPE) {
-        chart.updateOverlay(overlayId, { ...fields, onPressedMoving: onDrag, onPressedMoveEnd: onDrag });
-        return;
+    const present = new Set(existing.map(overlay => overlay.id));
+    wanted.forEach(overlay => {
+      if (present.has(overlay.id)) {
+        const { id, ...fields } = overlay;
+        chart.updateOverlay(id, fields);
+      } else {
+        chart.createOverlay(overlay);
       }
-      // A line of this id from an older build (for example a `price_line`
-      // overlay restored from persisted state) cannot be updated into the new
-      // type, so replace it.
-      if (existing) chart.removeOverlay(overlayId);
-      chart.createOverlay({ id: overlayId, ...fields, onPressedMoving: onDrag, onPressedMoveEnd: onDrag });
-    });
-  };
-
-  const buildLayerData = (source: KLineData[], multiplier: number, wave: number) => {
-    return source.map((item, index) => {
-      const drift = 1 + Math.sin(index / 10) * wave + Math.cos(index / 17) * wave * 0.6;
-      const scaledOpen = item.open * multiplier * drift;
-      const scaledClose = item.close * multiplier * (1 + Math.sin(index / 13) * wave * 0.8);
-      const high = Math.max(scaledOpen, scaledClose, item.high * multiplier * drift);
-      const low = Math.min(scaledOpen, scaledClose, item.low * multiplier * drift);
-
-      return {
-        ...item,
-        open: scaledOpen,
-        high,
-        low,
-        close: scaledClose,
-      };
-    });
-  };
-
-  useEffect(() => {
-    if (!chartContainerRef.current) return;
-
-    const mainChart = new FusionCandlestickChart(chartContainerRef.current, {
-      layout: { background: { color: '#131722' }, textColor: '#d1d4dc' },
-      ...options,
-    });
-    mainChart.addCandlestickSeries();
-    mainChart.setData(data);
-
-    const stackedLayers: StackedPricePaneInput[] = stackedPricePanes ?? [
-      {
-        id: 'eth',
-        side: 'left',
-        data: buildLayerData(data, 0.42, 0.035),
-        options: { upColor: 'rgba(56, 189, 248, 0.55)', downColor: 'rgba(14, 165, 233, 0.35)', borderUpColor: '#38bdf8', borderDownColor: '#0ea5e9', wickUpColor: '#7dd3fc', wickDownColor: '#38bdf8' }
-      },
-      {
-        id: 'sol',
-        side: 'right',
-        data: buildLayerData(data, 0.18, 0.042),
-        options: { upColor: 'rgba(244, 114, 182, 0.5)', downColor: 'rgba(236, 72, 153, 0.35)', borderUpColor: '#f472b6', borderDownColor: '#ec4899', wickUpColor: '#f9a8d4', wickDownColor: '#f472b6' }
-      },
-      {
-        id: 'nvda',
-        side: 'left',
-        data: buildLayerData(data, 1.28, 0.028),
-        options: { upColor: 'rgba(132, 204, 22, 0.45)', downColor: 'rgba(101, 163, 13, 0.32)', borderUpColor: '#84cc16', borderDownColor: '#65a30d', wickUpColor: '#bef264', wickDownColor: '#84cc16' }
-      },
-      {
-        id: 'tsla',
-        side: 'right',
-        data: buildLayerData(data, 0.74, 0.032),
-        options: { upColor: 'rgba(251, 191, 36, 0.45)', downColor: 'rgba(245, 158, 11, 0.3)', borderUpColor: '#fbbf24', borderDownColor: '#f59e0b', wickUpColor: '#fde68a', wickDownColor: '#fbbf24' }
-      },
-      {
-        id: 'aapl',
-        side: 'left',
-        data: buildLayerData(data, 0.93, 0.024),
-        options: { upColor: 'rgba(168, 85, 247, 0.42)', downColor: 'rgba(147, 51, 234, 0.28)', borderUpColor: '#a855f7', borderDownColor: '#9333ea', wickUpColor: '#d8b4fe', wickDownColor: '#a855f7' }
-      },
-    ];
-
-    stackedLayers.forEach(layer => {
-      mainChart.addStackedPricePane({
-        id: layer.id,
-        data: layer.data,
-        side: layer.side,
-        style: layer.style ?? 'candle',
-        options: layer.options,
-      });
     });
 
-    if (overlays) {
-      overlays.forEach(overlay => mainChart.createOverlay(overlay));
-    } else if (data.length > 50) {
-      mainChart.createOverlay({
-        type: 'line',
-        points: [
-          { timestamp: data[0].timestamp, value: data[0].low },
-          { timestamp: data[data.length - 1].timestamp, value: data[data.length - 1].high }
-        ],
-        color: '#2962FF',
-        lineWidth: 2,
-        line: { direction: 'free', extendStart: false, extendEnd: false }
-      });
-    }
+    overlaysRef.current = { ids: wantedIds };
+  }, [overlays]);
 
-    // A rebuilt chart starts without its trading lines (their callbacks are not
-    // persisted), so they are restored here, not only when `tradingLines` changes.
-    syncTradingLines(mainChart, tradingLines);
-
-    chartRef.current = mainChart;
-    onChartReady?.(mainChart);
-
-    return () => {
-      mainChart.destroy();
-      chartRef.current = null;
-    };
-  }, [data, options, stackedPricePanes, overlays, onChartReady]);
-
-  // Keep the chart's trading lines in step with the `tradingLines` prop.
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart) return;
-    syncTradingLines(chart, tradingLines);
+    // The data effect runs first in the same commit, so this is the bar set the chart shows.
+    const synced = dataRef.current;
+    const anchorTimestamp = synced && synced.length > 0 ? synced[synced.length - 1].timestamp : 0;
+    syncTradingLines(chart, tradingLines, anchorTimestamp, (id, price) => {
+      latest.current.onTradingLineDrag?.(id, price);
+    });
   }, [tradingLines]);
 
-  // Synchronize active symbol changes
   useEffect(() => {
-    if (chartRef.current && symbol) {
-      chartRef.current.applyOptions({
-        watermark: {
-          text: symbol,
-        }
-      });
+    const chart = chartRef.current;
+    if (chart && symbol) {
+      chart.applyOptions({ watermark: { text: symbol } });
     }
   }, [symbol]);
 
   return (
     <div
-      ref={chartContainerRef}
+      ref={containerRef}
       className={className}
       style={{ width: '100%', height: '100%', ...style }}
     />

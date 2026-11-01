@@ -98,18 +98,51 @@ SeriesRegistry.register('custom', CustomSeries);
 ## React Component
 
 ```tsx
+import { useCallback, useMemo } from 'react';
 import { FusionCandlestickChartComponent } from 'fscandle/react';
+
+const options = { toolbar: { visible: false } };  // module-level, or memoised
+
+const handleReady = (chart) => {
+  chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+    console.log(range);
+  });
+};
 
 <FusionCandlestickChartComponent
   data={data}
-  options={{ toolbar: { visible: false } }}
-  onChartReady={chart => {
-    chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
-      console.log(range);
-    });
-  }}
+  options={options}
+  onChartReady={handleReady}
+  persistenceKey="btc-main"
 />;
 ```
+
+The component creates one chart on mount and destroys it on unmount. Later prop
+changes update that chart in place, so the viewport, zoom and drawings survive
+re-renders:
+
+- `data`: a new bar at the end, or a changed last bar, is applied with
+  `updateData`. Any other change calls `setData`. Keep earlier bar objects
+  identical between updates (for example `[...prev, next]`) to get the fast path.
+- `options`: applied with `applyOptions`. A key removed from the object keeps its
+  last value.
+- `stackedPricePanes`: reconciled by `id`. A pane whose `side`, `style` or
+  `options` change is recreated; a pane whose only change is `data` is updated.
+- `overlays`: reconciled by `id`, and an overlay without one is keyed by its
+  position. Overlays the user draws are left alone.
+- `tradingLines`: drawn as horizontal lines with a price tag (`label` is shown).
+  Dragging calls `onTradingLineDrag(id, price)`; `draggable: false` locks a line.
+
+Memoise `options`, `overlays`, `stackedPricePanes` and their `data` arrays. An
+inline object is a new value on every render, so its work repeats each time.
+
+`persistenceKey` names the localStorage entry for the chart's drawings and
+layout. Charts on the same page need distinct keys; a shared key is logged as a
+warning in the console.
+
+`onChartReady` is called once per mounted chart. Under React StrictMode in
+development it runs twice, because effects are mounted, unmounted and mounted
+again.
 
 ## Panes
 

@@ -6,7 +6,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- `FusionCandlestickChartComponent` keeps one chart instance per mount. Prop
+  changes update it in place instead of destroying and rebuilding it, so
+  re-rendering no longer resets the viewport or repeats setup work. Live bars
+  are applied with `updateData`, and `onChartReady` runs once per mount.
+- New `persistenceKey` prop. Charts on the same page warn when they share a
+  persistence key.
+- Caller options take precedence over saved chart state.
+
+### Removed
+
+- The React component no longer draws demo data by default: the five
+  stacked panes (`eth`, `sol`, `nvda`, `tsla`, `aapl`) that were derived from
+  the input data and the default trend line. Pass `stackedPricePanes` and
+  `overlays` to show them.
+
 ### Fixed
+
+- Overlays passed in `overlays` were duplicated each time the chart was rebuilt;
+  they are now reconciled by `id`.
 
 - `FusionCandlestickChartComponent` trading lines (`tradingLines`) were never
   drawn or draggable: they used an overlay type (`price_line`) that no template
