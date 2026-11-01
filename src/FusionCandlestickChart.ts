@@ -30,7 +30,6 @@ import { findUnknownOptionPaths } from './model/optionSchema';
 import { assignPriceScaleColumns } from './model/priceScaleLayout';
 import { priceFormatOptions } from './model/priceFormat';
 import { PriceExtentCache } from './model/priceExtent';
-import { visibleIndexRange } from './model/visibleRange';
 import {
   PriceLineRegistry,
   SeriesMarkerRegistry,
@@ -47,7 +46,6 @@ import { EventController } from './engine/EventController';
 import { PaneManager } from './engine/PaneManager';
 import { InvalidationState } from './model/invalidation';
 import { buildChartFrame, type ChartFrame, type PaneFrame } from './model/renderFrame';
-import { findSessionBoundaries } from './model/sessionSeparators';
 import { InteractionController, type InteractionHost } from './engine/InteractionController';
 import { ChartStore } from './store/ChartStore';
 import { PrimitiveManager } from './engine/PrimitiveManager';
@@ -86,6 +84,12 @@ import {
   getPaddedPriceRange,
 } from './model/priceScaleMath';
 import { ChromeRenderer } from './renderer/ChromeRenderer';
+import { renderMainPaneCrosshair } from './renderer/mainPaneCrosshair';
+import { renderSeriesBeacons } from './renderer/seriesBeacons';
+import { renderSessionSeparators } from './renderer/sessionSeparators';
+import { renderIndicatorCrosshair } from './renderer/indicatorCrosshair';
+import { indicatorPaneRange } from './model/indicatorRange';
+import { renderSeriesValueTags, renderValueTag } from './renderer/axisTags';
 import {
   renderLastPriceLine,
   renderPriceLineLabels,
@@ -3781,115 +3785,6 @@ export class FusionCandlestickChart {
     });
   }
 
-  /**
-   * The crosshair, and everything it draws outside the plot.
-   *
-   * Roughly a third of the main pane's render pass was this: the crosshair
-   * itself, its horizontal extension into every visible price gutter with a
-   * price label, and its vertical extension into both time rulers with a time
-   * label. It reads a lot of the pass's locals, which is why it is a parameter
-   * object rather than a method reaching back into fields -- the inputs are now
-   * written down instead of inherited from the enclosing scope.
-   */
-  private _renderMainPaneCrosshair(params: {
-    overlayCtx: CanvasRenderingContext2D;
-    leftAxisOverlayCtx: CanvasRenderingContext2D;
-    rightAxisOverlayCtx: CanvasRenderingContext2D;
-    priceScales: PriceScaleFrame[];
-    primaryScale: PriceScaleFrame;
-    bounding: Bounding;
-    realWidth: number;
-    realHeight: number;
-    data: KLineData[];
-    /** Whether this pane is the bottom one, which owns the lower time ruler. */
-    isBottomPane: boolean;
-  }): void {
-    const {
-      overlayCtx,
-      leftAxisOverlayCtx,
-      rightAxisOverlayCtx,
-      priceScales,
-      primaryScale,
-      bounding,
-      realWidth,
-      realHeight,
-      data,
-      isBottomPane,
-    } = params;
-
-    const crosshairPos = this._crosshairPos || this._remoteCrosshairPos;
-    if (this._options.crosshair.visible && crosshairPos) {
-      const localX = crosshairPos.x;
-      const localY = crosshairPos.y - (bounding.top - (this._toolbarHeight + this._xAxisHeight));
-
-      if (localY >= 0 && localY <= realHeight) {
-        this._chrome.drawCrosshair(overlayCtx, realWidth, realHeight, { x: localX, y: localY });
-
-        const crossColor = this._options.crosshair.color;
-        const crossStyle = this._options.crosshair.style;
-
-        priceScales.forEach(scale => {
-          if (this._hiddenSeriesIds.has(scale.id)) return;
-          const axisOverlayCtx = scale.side === 'left' ? leftAxisOverlayCtx : rightAxisOverlayCtx;
-          // Draw horizontal crosshair extension line into y-axis
-          this._withAxisColumn(axisOverlayCtx, scale.side, scale.axisIndex, realHeight, axisBounds => {
-            axisOverlayCtx.save();
-            axisOverlayCtx.strokeStyle = crossColor;
-            axisOverlayCtx.lineWidth = 1;
-            if (crossStyle === 'dashed') axisOverlayCtx.setLineDash([3, 3]);
-            axisOverlayCtx.beginPath();
-            axisOverlayCtx.moveTo(0, localY); axisOverlayCtx.lineTo(axisBounds.width, localY);
-            axisOverlayCtx.stroke();
-            axisOverlayCtx.setLineDash([]);
-            axisOverlayCtx.restore();
-            // Price label on top of the line
-            this._yAxis.renderLabel(
-              axisOverlayCtx,
-              localY,
-              this._formatPriceValue(scale.transformer.yToPrice(localY)),
-              axisBounds,
-              scale.side,
-            );
-          });
-        });
-
-        // Draw vertical crosshair extension into top x-axis
-        const topXOverlayCtx = this._topXAxisCanvases.get('overlay')!.getContext('2d')!;
-        topXOverlayCtx.save();
-        topXOverlayCtx.strokeStyle = crossColor;
-        topXOverlayCtx.lineWidth = 1;
-        if (crossStyle === 'dashed') topXOverlayCtx.setLineDash([3, 3]);
-        topXOverlayCtx.beginPath();
-        topXOverlayCtx.moveTo(localX + this._leftYAxisWidth, 0); topXOverlayCtx.lineTo(localX + this._leftYAxisWidth, this._xAxisHeight);
-        topXOverlayCtx.stroke();
-        topXOverlayCtx.setLineDash([]);
-        topXOverlayCtx.restore();
-
-        if (isBottomPane) {
-          const index = Math.round(primaryScale.transformer.xToIndex(localX));
-          const item = data[index];
-          if (item) {
-            const timeText = this._formatTimeValue(item.timestamp, 'crosshair');
-            // Bottom x-axis: draw extension line + label
-            const bottomOverlayCtx = this._bottomXAxisCanvases.get('overlay')!.getContext('2d')!;
-            bottomOverlayCtx.save();
-            bottomOverlayCtx.strokeStyle = crossColor;
-            bottomOverlayCtx.lineWidth = 1;
-            if (crossStyle === 'dashed') bottomOverlayCtx.setLineDash([3, 3]);
-            bottomOverlayCtx.beginPath();
-            bottomOverlayCtx.moveTo(localX + this._leftYAxisWidth, 0); bottomOverlayCtx.lineTo(localX + this._leftYAxisWidth, this._xAxisHeight);
-            bottomOverlayCtx.stroke();
-            bottomOverlayCtx.setLineDash([]);
-            bottomOverlayCtx.restore();
-            this._xAxis.renderLabel(bottomOverlayCtx, localX, timeText, { width: realWidth, height: this._xAxisHeight, left: this._leftYAxisWidth, top: 0 }, 'bottom');
-            // Also render on top x-axis
-            this._xAxis.renderLabel(topXOverlayCtx, localX, timeText, { width: realWidth, height: this._xAxisHeight, left: this._leftYAxisWidth, top: 0 }, 'top');
-          }
-        }
-      }
-    }
-  }
-
   /** The canvases of one pane, in the set the render pass needs. */
   private _paneContexts(pane: Pane): PaneContexts | null {
     const chart = pane.getContext('main', 'chart');
@@ -4075,7 +3970,7 @@ export class FusionCandlestickChart {
 
     if (level >= InvalidationLevel.Light) {
       this._chrome.drawWatermark(gridCtx, realWidth, realHeight);
-      this._renderSessionSeparators(gridCtx, data, realWidth, realHeight, primaryScale.transformer);
+      renderSessionSeparators(gridCtx, this._options.timeScale.sessionSeparator, this._session, data, realWidth, realHeight, primaryScale.transformer);
       // Grid rendering is handled by GridPrimitive.
       this._drawPrimitivePaneViews(gridCtx, paneId, 'grid', 'chart', bounding, { ...bounding, width: realWidth }, primaryScale.transformer);
 
@@ -4083,25 +3978,16 @@ export class FusionCandlestickChart {
         if (this._options.axis.dual) {
           // Draw left Y-axis (e.g. Percentage)
           const leftGridCtx = contexts.leftAxisGrid;
-          this._renderAxisBg(leftGridCtx, 'left', 0, realHeight);
-          this._withAxisColumn(leftGridCtx, 'left', 0, realHeight, axisBounds => {
-            this._yAxis.render(leftGridCtx, primaryScale.transformer, axisBounds, 'left');
-          });
+          this._drawPriceColumn(leftGridCtx, 'left', 0, realHeight, primaryScale.transformer);
 
           // Draw right Y-axis (e.g. Dollar Price)
           const rightGridCtx = contexts.rightAxisGrid;
-          this._renderAxisBg(rightGridCtx, 'right', 0, realHeight);
-          this._withAxisColumn(rightGridCtx, 'right', 0, realHeight, axisBounds => {
-            this._yAxis.render(rightGridCtx, primaryScale.transformer, axisBounds, 'right');
-          });
+          this._drawPriceColumn(rightGridCtx, 'right', 0, realHeight, primaryScale.transformer);
         } else {
           priceScales.forEach(scale => {
             if (this._hiddenSeriesIds.has(scale.id)) return;
             const axisGridCtx = scale.side === 'left' ? contexts.leftAxisGrid : contexts.rightAxisGrid;
-            this._renderAxisBg(axisGridCtx, scale.side, scale.axisIndex, realHeight);
-            this._withAxisColumn(axisGridCtx, scale.side, scale.axisIndex, realHeight, axisBounds => {
-              this._yAxis.render(axisGridCtx, scale.transformer, axisBounds, scale.side);
-            });
+            this._drawPriceColumn(axisGridCtx, scale.side, scale.axisIndex, realHeight, scale.transformer);
           });
         }
       }
@@ -4115,26 +4001,7 @@ export class FusionCandlestickChart {
         .filter(series => series !== this._mainSeries)
         .forEach(series => series.render(ctx, primaryScale.transformer));
 
-      // Draw beacon dot at current leading tip of each series
-      this._series.forEach(series => {
-        const sData = series.getData();
-        if (sData.length === 0) return;
-        const lastIdx = sData.length - 1;
-        const last = sData[lastIdx];
-        const x = primaryScale.transformer.indexToX(lastIdx);
-        const y = primaryScale.transformer.priceToY(last.close);
-        if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > realWidth || y < 0 || y > realHeight) return;
-        const color = (series.getOptions() as { color?: string }).color || '#2962ff';
-        ctx.save();
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        ctx.arc(x, y, 4, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-        ctx.restore();
-      });
+      renderSeriesBeacons(ctx, this._series, primaryScale.transformer, realWidth, realHeight);
 
       if (this._options.axis.lastPriceLineVisible !== false) {
         renderLastPriceLine(ctx, realWidth, primaryScale.transformer, data);
@@ -4180,86 +4047,33 @@ export class FusionCandlestickChart {
       }
     }
 
-    this._renderMainPaneCrosshair({
-      overlayCtx,
-      leftAxisOverlayCtx: contexts.leftAxisOverlay,
-      rightAxisOverlayCtx: contexts.rightAxisOverlay,
-      priceScales,
-      primaryScale,
-      bounding,
-      realWidth,
-      realHeight,
+    renderMainPaneCrosshair({
+      canvases: {
+        overlay: overlayCtx,
+        leftAxisOverlay: contexts.leftAxisOverlay,
+        rightAxisOverlay: contexts.rightAxisOverlay,
+        topXOverlay: this._topXAxisCanvases.get('overlay')!.getContext('2d')!,
+        bottomXOverlay: () => this._bottomXAxisCanvases.get('overlay')!.getContext('2d')!,
+      },
+      scales: priceScales,
+      primaryTransformer: primaryScale.transformer,
+      pane: { bounding, width: realWidth, height: realHeight, isBottom: paneFrame.isLast },
+      geometry: { toolbarHeight: this._toolbarHeight, xAxisHeight: this._xAxisHeight, leftYAxisWidth: this._leftYAxisWidth },
+      crosshair: this._crosshairPos || this._remoteCrosshairPos,
+      style: { visible: this._options.crosshair.visible, color: this._options.crosshair.color, style: this._options.crosshair.style },
+      isHidden: id => this._hiddenSeriesIds.has(id),
       data,
-      isBottomPane: paneFrame.isLast,
+      chrome: this._chrome,
+      yAxis: this._yAxis,
+      xAxis: this._xAxis,
+      withAxisColumn: (ctx, side, axisIndex, height, draw) => this._withAxisColumn(ctx, side, axisIndex, height, draw),
+      formatPrice: price => this._formatPriceValue(price),
+      formatTime: timestamp => this._formatTimeValue(timestamp, 'crosshair'),
     });
 
     if (this._options.axis.visible !== false) {
       if (this._options.axis.dual) {
-        // Left axis overlay: live percentage labels for all series
-        const leftOverlayCtx = contexts.leftAxisOverlay;
-        this._withAxisColumn(leftOverlayCtx, 'left', 0, realHeight, axisBounds => {
-          renderPriceLineLabels(leftOverlayCtx, axisBounds, 'left', primaryScale.transformer, this._priceLines.all(), this._yAxis, price => this._formatPriceValue(price));
-          // Render live tag for main series
-          const mainData = this._dataStore.getData();
-          if (mainData.length > 0) {
-            const last = mainData[mainData.length - 1];
-            const y = primaryScale.transformer.priceToY(last.close);
-            if (Number.isFinite(y) && y >= 0 && y <= axisBounds.height) {
-              const mainColor = (this._mainSeries?.getOptions() as { color?: string })?.color || '#f59e0b';
-              const label = this._options.localization.leftPriceFormatter
-                ? this._options.localization.leftPriceFormatter(last.close)
-                : this._formatPriceValue(last.close);
-              this._yAxis.renderLabel(leftOverlayCtx, y, label, axisBounds, 'left', mainColor);
-            }
-          }
-          // Render live tags for secondary series
-          this._series
-            .filter(s => s !== this._mainSeries)
-            .forEach(s => {
-              const sData = s.getData();
-              if (sData.length === 0) return;
-              const last = sData[sData.length - 1];
-              const y = primaryScale.transformer.priceToY(last.close);
-              if (!Number.isFinite(y) || y < 0 || y > axisBounds.height) return;
-              const color = (s.getOptions() as { color?: string }).color || '#2962ff';
-              const label = this._options.localization.leftPriceFormatter
-                ? this._options.localization.leftPriceFormatter(last.close)
-                : this._formatPriceValue(last.close);
-              this._yAxis.renderLabel(leftOverlayCtx, y, label, axisBounds, 'left', color);
-            });
-        });
-
-        // Right axis overlay: live dollar price labels for all assets (BTC, SPY, QQQ)
-        const rightOverlayCtx = contexts.rightAxisOverlay;
-        this._withAxisColumn(rightOverlayCtx, 'right', 0, realHeight, axisBounds => {
-          const mainData = this._dataStore.getData();
-          if (mainData.length > 0) {
-            const last = mainData[mainData.length - 1];
-            const y = primaryScale.transformer.priceToY(last.close);
-            if (Number.isFinite(y) && y >= 0 && y <= axisBounds.height) {
-              const mainColor = (this._mainSeries?.getOptions() as { color?: string })?.color || '#f59e0b';
-              const label = this._options.localization.rightPriceFormatter
-                ? this._options.localization.rightPriceFormatter(last.close, 0)
-                : this._formatPriceValue(last.close);
-              this._yAxis.renderLabel(rightOverlayCtx, y, label, axisBounds, 'right', mainColor);
-            }
-          }
-          // Render live actual price tags for secondary series
-          this._series
-            .filter(s => s !== this._mainSeries)
-            .forEach((s, idx) => {
-              const sData = s.getData();
-              if (sData.length === 0) return;
-              const last = sData[sData.length - 1];
-              const y = primaryScale.transformer.priceToY(last.close);
-              if (!Number.isFinite(y) || y < 0 || y > axisBounds.height) return;
-              const color = (s.getOptions() as { color?: string }).color || '#2962ff';
-              const label = this._options.localization.rightPriceFormatter
-                ? this._options.localization.rightPriceFormatter(last.close, idx + 1)
-                : this._formatPriceValue(last.close);
-              this._yAxis.renderLabel(rightOverlayCtx, y, label, axisBounds, 'right', color);
-            });
-        });
+        this._renderDualAxisTags(contexts, primaryScale, data, realHeight);
       } else {
         priceScales.forEach(scale => {
           if (this._hiddenSeriesIds.has(scale.id)) return;
@@ -4268,24 +4082,80 @@ export class FusionCandlestickChart {
             this._renderLastPriceTag(axisOverlayCtx, axisBounds, scale.id, scale.side, scale.transformer);
             if (scale.isPrimary) {
               renderPriceLineLabels(axisOverlayCtx, axisBounds, scale.side, scale.transformer, this._priceLines.all(), this._yAxis, price => this._formatPriceValue(price));
-              // Render live price tags for all secondary series on main pane
-              this._series
-                .filter(s => s !== this._mainSeries)
-                .forEach(s => {
-                  const sData = s.getData();
-                  if (sData.length === 0) return;
-                  const last = sData[sData.length - 1];
-                  const y = scale.transformer.priceToY(last.close);
-                  if (!Number.isFinite(y) || y < 0 || y > axisBounds.height) return;
-                  const color = (s.getOptions() as { color?: string }).color || '#2962ff';
-                  this._yAxis.renderLabel(axisOverlayCtx, y, this._formatPriceValue(last.close), axisBounds, scale.side, color);
-                });
+              renderSeriesValueTags(axisOverlayCtx, this._yAxis, axisBounds, scale.transformer, this._secondarySeries(), {
+                side: scale.side,
+                fallbackColor: '#2962ff',
+                text: close => this._formatPriceValue(close),
+              });
             }
             this._drawPrimitivePriceAxisViews(axisOverlayCtx, paneId, scale.side, scale.axisIndex, axisBounds, scale.transformer);
           });
         });
       }
     }
+  }
+
+  /** One price column's background and its tick labels, for the given transformer. */
+  private _drawPriceColumn(
+    ctx: CanvasRenderingContext2D,
+    side: PaneAxisSide,
+    axisIndex: number,
+    height: number,
+    transformer: CoordinateTransformer,
+  ) {
+    this._renderAxisBg(ctx, side, axisIndex, height);
+    this._withAxisColumn(ctx, side, axisIndex, height, axisBounds => {
+      this._yAxis.render(ctx, transformer, axisBounds, side);
+    });
+  }
+
+  /** Dual axes label the main series on both sides, each side with its own formatter. */
+  private _renderDualAxisTags(
+    contexts: PaneContexts,
+    primaryScale: PriceScaleFrame,
+    data: KLineData[],
+    realHeight: number,
+  ) {
+    const transformer = primaryScale.transformer;
+    const { localization } = this._options;
+    const leftText = (close: number) =>
+      localization.leftPriceFormatter ? localization.leftPriceFormatter(close) : this._formatPriceValue(close);
+    const rightText = (close: number, index: number) =>
+      localization.rightPriceFormatter ? localization.rightPriceFormatter(close, index) : this._formatPriceValue(close);
+    const mainColor = (this._mainSeries?.getOptions() as { color?: string })?.color || '#f59e0b';
+    const mainLast = data.length > 0 ? data[data.length - 1] : null;
+    const secondary = this._secondarySeries();
+
+    const leftCtx = contexts.leftAxisOverlay;
+    this._withAxisColumn(leftCtx, 'left', 0, realHeight, axisBounds => {
+      renderPriceLineLabels(leftCtx, axisBounds, 'left', transformer, this._priceLines.all(), this._yAxis, price => this._formatPriceValue(price));
+      if (mainLast) {
+        renderValueTag(leftCtx, this._yAxis, axisBounds, transformer, mainLast.close, () => leftText(mainLast.close), mainColor, 'left');
+      }
+      renderSeriesValueTags(leftCtx, this._yAxis, axisBounds, transformer, secondary, {
+        side: 'left',
+        fallbackColor: '#2962ff',
+        text: close => leftText(close),
+      });
+    });
+
+    const rightCtx = contexts.rightAxisOverlay;
+    this._withAxisColumn(rightCtx, 'right', 0, realHeight, axisBounds => {
+      if (mainLast) {
+        renderValueTag(rightCtx, this._yAxis, axisBounds, transformer, mainLast.close, () => rightText(mainLast.close, 0), mainColor, 'right');
+      }
+      // Secondary series are numbered from 1 on the right: the main series is 0.
+      renderSeriesValueTags(rightCtx, this._yAxis, axisBounds, transformer, secondary, {
+        side: 'right',
+        fallbackColor: '#2962ff',
+        text: (close, index) => rightText(close, index + 1),
+      });
+    });
+  }
+
+  /** Every series except the main one, in the order they were added. */
+  private _secondarySeries(): BaseSeries[] {
+    return this._series.filter(series => series !== this._mainSeries);
   }
 
   /** A stacked pane: indicators, scaled to their own values. */
@@ -4314,22 +4184,12 @@ export class FusionCandlestickChart {
     transformer.setOffset(this._offset);
 
     const { leftIdx, rightIdx } = this._visibleIndexRange(transformer, realWidth, data.length);
-    let min = Infinity;
-    let max = -Infinity;
-    this._indicatorManager.getIndicators(paneId).forEach(indicator => {
-      const extent = indicator.extent(leftIdx, rightIdx);
-      if (!extent) return;
-      min = Math.min(min, extent.min);
-      max = Math.max(max, extent.max);
-    });
-
-    if (min === Infinity) {
-      // Nothing finite to scale to yet — an indicator still warming up, a pane
-      // whose indicator was just removed, or a viewport past the data.
-      min = this._options.indicators.fallbackRange.min;
-      max = this._options.indicators.fallbackRange.max;
-    }
-
+    // Falls back when nothing finite is on screen yet: an indicator still warming
+    // up, a pane whose indicator was just removed, or a viewport past the data.
+    const { min, max } = indicatorPaneRange(
+      this._indicatorManager.getIndicators(paneId).map(indicator => indicator.extent(leftIdx, rightIdx)),
+      this._options.indicators.fallbackRange,
+    );
     const paddedRange = getPaddedPriceRange(min, max);
     transformer.setRange(paddedRange.min, paddedRange.max);
 
@@ -4354,10 +4214,7 @@ export class FusionCandlestickChart {
       this._drawPrimitivePaneViews(gridCtx, paneId, 'grid', 'chart', bounding, { ...bounding, width: realWidth }, transformer);
 
       if (this._options.axis.visible !== false) {
-        this._renderAxisBg(axisGridCtx, paneSide, 0, realHeight);
-        this._withAxisColumn(axisGridCtx, paneSide, 0, realHeight, axisBounds => {
-          this._yAxis.render(axisGridCtx, transformer, axisBounds, paneSide);
-        });
+        this._drawPriceColumn(axisGridCtx, paneSide, 0, realHeight, transformer);
       }
 
       this._indicatorManager.render(paneId, {
@@ -4377,107 +4234,34 @@ export class FusionCandlestickChart {
     // the conversion used to be written out here against the pane's offset from
     // the plot origin.
     const crosshair = paneFrame.crosshair;
-    if (this._options.crosshair.visible && crosshair) {
-      this._chrome.drawCrosshair(overlayCtx, realWidth, realHeight, crosshair);
-
-      const crossColor = this._options.crosshair.color;
-      const crossStyle = this._options.crosshair.style;
-
-      // Extend the crosshair into the price gutter.
-      this._withAxisColumn(axisOverlayCtx, paneSide, 0, realHeight, axisBounds => {
-        axisOverlayCtx.save();
-        axisOverlayCtx.strokeStyle = crossColor;
-        axisOverlayCtx.lineWidth = 1;
-        if (crossStyle === 'dashed') axisOverlayCtx.setLineDash([3, 3]);
-        axisOverlayCtx.beginPath();
-        axisOverlayCtx.moveTo(0, crosshair.y); axisOverlayCtx.lineTo(axisBounds.width, crosshair.y);
-        axisOverlayCtx.stroke();
-        axisOverlayCtx.setLineDash([]);
-        axisOverlayCtx.restore();
-        this._yAxis.renderLabel(axisOverlayCtx, crosshair.y, this._formatPriceValue(transformer.yToPrice(crosshair.y)), axisBounds, paneSide);
+    if (crosshair) {
+      renderIndicatorCrosshair({
+        overlay: overlayCtx,
+        axisOverlay: axisOverlayCtx,
+        side: paneSide,
+        isLast: paneFrame.isLast,
+        transformer,
+        crosshair,
+        realWidth,
+        realHeight,
+        xAxisHeight: this._xAxisHeight,
+        leftYAxisWidth: this._leftYAxisWidth,
+        style: { visible: this._options.crosshair.visible, color: this._options.crosshair.color, style: this._options.crosshair.style },
+        data,
+        topRuler: this._topXHeight > 0 ? this._topXAxisCanvases.get('overlay')!.getContext('2d')! : null,
+        bottomRuler: this._bottomXHeight > 0 ? this._bottomXAxisCanvases.get('overlay')!.getContext('2d')! : null,
+        chrome: this._chrome,
+        yAxis: this._yAxis,
+        xAxis: this._xAxis,
+        withAxisColumn: (ctx, side, axisIndex, height, draw) => this._withAxisColumn(ctx, side, axisIndex, height, draw),
+        formatPrice: price => this._formatPriceValue(price),
+        formatTime: timestamp => this._formatTimeValue(timestamp, 'crosshair'),
       });
-
-      if (paneFrame.isLast) {
-        const index = Math.round(transformer.xToIndex(crosshair.x));
-        const item = data[index];
-        if (item) {
-          const timeText = this._formatTimeValue(item.timestamp, 'crosshair');
-          const rulerBounds = { width: realWidth, height: this._xAxisHeight, left: this._leftYAxisWidth, top: 0 };
-          if (this._bottomXHeight > 0) {
-            const bottomOverlayCtx = this._bottomXAxisCanvases.get('overlay')!.getContext('2d')!;
-            bottomOverlayCtx.save();
-            bottomOverlayCtx.strokeStyle = crossColor;
-            bottomOverlayCtx.lineWidth = 1;
-            if (crossStyle === 'dashed') bottomOverlayCtx.setLineDash([3, 3]);
-            bottomOverlayCtx.beginPath();
-            bottomOverlayCtx.moveTo(crosshair.x + this._leftYAxisWidth, 0); bottomOverlayCtx.lineTo(crosshair.x + this._leftYAxisWidth, this._xAxisHeight);
-            bottomOverlayCtx.stroke();
-            bottomOverlayCtx.setLineDash([]);
-            bottomOverlayCtx.restore();
-            this._xAxis.renderLabel(bottomOverlayCtx, crosshair.x, timeText, rulerBounds, 'bottom');
-          }
-          if (this._topXHeight > 0) {
-            const topXOverlayCtx = this._topXAxisCanvases.get('overlay')!.getContext('2d')!;
-            topXOverlayCtx.save();
-            topXOverlayCtx.strokeStyle = crossColor;
-            topXOverlayCtx.lineWidth = 1;
-            if (crossStyle === 'dashed') topXOverlayCtx.setLineDash([3, 3]);
-            topXOverlayCtx.beginPath();
-            topXOverlayCtx.moveTo(crosshair.x + this._leftYAxisWidth, 0); topXOverlayCtx.lineTo(crosshair.x + this._leftYAxisWidth, this._xAxisHeight);
-            topXOverlayCtx.stroke();
-            topXOverlayCtx.setLineDash([]);
-            topXOverlayCtx.restore();
-            this._xAxis.renderLabel(topXOverlayCtx, crosshair.x, timeText, rulerBounds, 'top');
-          }
-        }
-      }
     }
 
     this._withAxisColumn(axisOverlayCtx, paneSide, 0, realHeight, axisBounds => {
       this._drawPrimitivePriceAxisViews(axisOverlayCtx, paneId, paneSide, 0, axisBounds, transformer);
     });
-  }
-
-  /**
-   * A rule where the trading day changes, so a multi-session sparkline does not
-   * read as one continuous run. Which bars start a day is `findSessionBoundaries`'
-   * business; this only turns indices into lines.
-   */
-  private _renderSessionSeparators(
-    ctx: CanvasRenderingContext2D,
-    data: KLineData[],
-    realWidth: number,
-    realHeight: number,
-    transformer: CoordinateTransformer,
-  ) {
-    const separator = this._options.timeScale.sessionSeparator;
-    if (!separator?.visible || data.length < 2) return;
-
-    const visible = visibleIndexRange(x => transformer.xToIndex(x), realWidth, data.length);
-    const boundaries = findSessionBoundaries({
-      timestamps: data.map(bar => bar.timestamp),
-      from: visible.start,
-      to: visible.end,
-      session: this._session,
-    });
-    if (boundaries.length === 0) return;
-
-    ctx.save();
-    ctx.strokeStyle = separator.color;
-    ctx.lineWidth = 1;
-    if (separator.style === 'dashed') ctx.setLineDash([4, 4]);
-    for (const index of boundaries) {
-      // Half a bar to the left of the opening bar: the break belongs between
-      // the two sessions, not on top of the first bar of the new one.
-      const x = Math.round(transformer.indexToX(index) - transformer.getBarSpacing() / 2) + 0.5;
-      if (x < 0 || x > realWidth) continue;
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, realHeight);
-      ctx.stroke();
-    }
-    ctx.setLineDash([]);
-    ctx.restore();
   }
 
   /** Fill a y-axis column canvas with a tinted background and an inner border line. */
@@ -4521,7 +4305,6 @@ export class FusionCandlestickChart {
     const mainColor = (this._mainSeries?.getOptions() as { color?: string })?.color;
     const bgColor = mainColor || (last.close >= last.open ? 'rgba(38, 166, 154, 0.85)' : 'rgba(239, 83, 80, 0.85)');
     this._yAxis.renderLabel(ctx, y, this._formatPriceValue(last.close), bounding, side, bgColor);
-    ctx.restore();
   }
 
   private _updateLegends() {

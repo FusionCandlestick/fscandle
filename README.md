@@ -72,7 +72,7 @@ GUI, renderer, and model concerns are separated; pane and scale ownership still
 sit in the facade:
 
 - `src/model/` — period, trading session, timezone math, time formatting, price-scale geometry (pure, no DOM)
-- `src/renderer/` — chrome rendering (watermark, crosshair, extremes, axis rails) and colour math
+- `src/renderer/` — chrome rendering (watermark, extremes, axis rails) and colour math; the main-pane and indicator-pane crosshairs (`mainPaneCrosshair.ts`, `indicatorCrosshair.ts`), price-axis value tags (`axisTags.ts`), series beacons, and session separators, each drawn from explicit inputs
 - `src/gui/` — toolbar, data tooltip, series style menu, each reaching the chart only through an explicit host interface; `displayLabels.ts` holds the pure label formatting
 - `src/i18n/` — translation runtime plus locale dictionaries
 - `src/store/DataStore.ts` — sorted OHLC data, logical-index conversion, subscriptions; `persistence.ts` — the persisted-state contract

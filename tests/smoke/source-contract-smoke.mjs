@@ -138,10 +138,17 @@ assert.match(chart, /const localY = paneTop === undefined \? y : this\._getPaneL
 //    one left it holding the last-rendered indicator's range (RSI's 0-100) for
 //    everything that read it afterwards.
 assert.match(chart, /const transformer = this\._paneTransformers\.for\(paneId\)/);
-assert.doesNotMatch(
-  chart.slice(chart.indexOf('private _renderIndicatorPane'), chart.indexOf('private _renderIndicatorPane') + 6000),
-  /this\._coordinateTransformer/,
-);
+// The method's own text, up to the next class member, so the check neither
+// misses its end nor reads into a neighbour.
+const memberBody = (source, name) => {
+  const start = source.indexOf(`private ${name}(`);
+  assert.notEqual(start, -1, `${name} must exist`);
+  const next = source.slice(start + 1).search(/\n  (private|public|protected|get |set |\/\*\*)/);
+  return next === -1 ? source.slice(start) : source.slice(start, start + 1 + next);
+};
+const indicatorPaneBody = memberBody(chart, '_renderIndicatorPane');
+assert.match(indicatorPaneBody, /_paneTransformers\.for/);
+assert.doesNotMatch(indicatorPaneBody, /this\._coordinateTransformer/);
 
 // 3. The redraw latch must be released before any early return, or a chart that
 //    becomes visible without a resize never schedules another frame.
