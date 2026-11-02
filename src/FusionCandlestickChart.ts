@@ -3464,14 +3464,26 @@ export class FusionCandlestickChart {
     return this._coordinateTransformer.xToIndex(x);
   }
 
-  public getVisibleLogicalRange(): { from: number; to: number } {
+  /** Width of the main plot area, between the price axes. */
+  private _plotWidth(): number {
     const mainPane = this._panes.find(pane => pane.getId() === 'main');
-    const width = mainPane
-      ? mainPane.getBounding().width - this._rightYAxisWidth - this._leftYAxisWidth
-      : this._container.clientWidth - this._rightYAxisWidth - this._leftYAxisWidth;
+    const outer = mainPane ? mainPane.getBounding().width : this._container.clientWidth;
+    return outer - this._rightYAxisWidth - this._leftYAxisWidth;
+  }
+
+  /**
+   * The logical range of the bars area: from the left edge of the plot to where
+   * the right margin begins, the same two points `setVisibleLogicalRange`
+   * targets. Reading the plot's full right edge instead made the two
+   * asymmetric, so feeding one into the other widened the range by the margin
+   * on every round trip (about 5% at the default margin).
+   */
+  public getVisibleLogicalRange(): { from: number; to: number } {
+    const width = Math.max(this._plotWidth(), 0);
+    const barsWidth = width - width * this._rightMarginRatio;
     return {
       from: this._coordinateTransformer.xToIndex(0),
-      to: this._coordinateTransformer.xToIndex(Math.max(width, 0)),
+      to: this._coordinateTransformer.xToIndex(Math.max(barsWidth, 0)),
     };
   }
 
@@ -3491,11 +3503,7 @@ export class FusionCandlestickChart {
    */
   public setVisibleLogicalRange(range: { from: number; to: number }) {
     const span = Math.max(range.to - range.from, 1);
-    const mainPane = this._panes.find(pane => pane.getId() === 'main');
-    const width = mainPane
-      ? mainPane.getBounding().width - this._rightYAxisWidth - this._leftYAxisWidth
-      : this._container.clientWidth - this._rightYAxisWidth - this._leftYAxisWidth;
-    const realWidth = Math.max(width, 1);
+    const realWidth = Math.max(this._plotWidth(), 1);
     const rightMargin = realWidth * this._rightMarginRatio;
 
     this._barSpacing = Math.max(1, Math.min(100, Math.max(realWidth - rightMargin, 1) / span));

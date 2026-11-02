@@ -26,6 +26,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   warning), and throws without changing the chart when the input is not a
   drawing export or none of its overlays is usable.
 - The polling data feed runs one request at a time.
+- `getVisibleLogicalRange()`, and the range passed to
+  `subscribeVisibleLogicalRangeChange` and the visible time range events, now
+  end where the right margin begins rather than at the plot's right edge, so
+  `to` is slightly smaller than before. This matches what
+  `setVisibleLogicalRange()` takes.
 
 - `FusionCandlestickChartComponent` keeps one chart instance per mount. Prop
   changes update it in place instead of destroying and rebuilding it, so
@@ -58,6 +63,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   unsubscribed, and then reported `streaming` after `closed`. `destroy()` now
   stops in-flight requests too. The WebSocket feed ignores messages that arrive
   after unsubscribe.
+- Passing `getVisibleLogicalRange()` back to `setVisibleLogicalRange()` widened
+  the range by the right margin (about 5%) on every round trip, so code syncing
+  panels through the two drifted out. The pair now round-trips exactly.
 - Overlays passed in `overlays` were duplicated each time the chart was rebuilt;
   they are now reconciled by `id`.
 

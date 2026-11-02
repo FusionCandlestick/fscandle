@@ -254,7 +254,7 @@ test.describe('options and scales', () => {
     expect(price).toBeCloseTo(103.5, 6);
   });
 
-  test('the visible logical range can be set, read back, and observed', async ({ page }) => {
+  test('the visible logical range reads back what was set, and can be observed', async ({ page }) => {
     opened = await chartPage(page);
     const result = await page.evaluate(() => {
       const timeScale = window.chart.timeScale();
@@ -263,15 +263,28 @@ test.describe('options and scales', () => {
       timeScale.setVisibleLogicalRange({ from: 40, to: 80 });
       const range = timeScale.getVisibleLogicalRange();
       unsubscribe();
-      return { range, notified: seen.length > 0 };
+      return { range, last: seen[seen.length - 1] };
     });
-    expect(result.range?.from).toBeCloseTo(40, 0);
-    // The setter puts `to` where the right margin starts; the getter reads the
-    // plot's full right edge. So the range read back ends a little past 80,
-    // and a get-then-set round trip widens it by the margin each time.
-    expect(result.range?.to).toBeGreaterThan(80);
-    expect(result.range?.to).toBeLessThan(80 + 0.1 * 40);
-    expect(result.notified).toBe(true);
+    expect(result.range.from).toBeCloseTo(40, 6);
+    expect(result.range.to).toBeCloseTo(80, 6);
+    expect(result.last).toEqual(result.range);
+  });
+
+  test('feeding the range back in does not widen it (regression)', async ({ page }) => {
+    opened = await chartPage(page, {}, makeBars(300));
+    const spans = await page.evaluate(() => {
+      const timeScale = window.chart.timeScale();
+      timeScale.setVisibleLogicalRange({ from: 40, to: 80 });
+      const out: number[] = [];
+      for (let i = 0; i < 5; i++) {
+        const range = timeScale.getVisibleLogicalRange();
+        out.push(range.to - range.from);
+        timeScale.setVisibleLogicalRange(range);
+      }
+      return out;
+    });
+    // Each round trip used to widen the span by the right margin: 40, 42.1, 44.3, ...
+    for (const span of spans) expect(span).toBeCloseTo(40, 6);
   });
 });
 

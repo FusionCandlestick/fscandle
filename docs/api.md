@@ -42,7 +42,7 @@ timeScale.scrollToLatest();
 
 `subscribeVisibleLogicalRangeChange` invokes the callback immediately with the current range and again when scroll, zoom, data-follow, or explicit range changes move the visible logical window.
 
-`setVisibleLogicalRange` puts `from` at the left edge and `to` where the right margin begins, so the newest bar keeps its space for the last-price label. `getVisibleLogicalRange` reports the whole plot, margin included, so its `to` is a little larger than the one you set. Do not feed one chart's `getVisibleLogicalRange()` into another's `setVisibleLogicalRange()` repeatedly: each round trip widens the range by the margin. To keep charts in step, use `ChartSyncGroup`, which copies the viewport directly.
+Both methods describe the bars area: `from` at the left edge of the plot, `to` where the right margin begins (the empty space that keeps the newest bar clear of the last-price label). So `getVisibleLogicalRange()` returns what `setVisibleLogicalRange()` was given, and one chart's range can be passed to another's setter to show the same bars. The change callbacks report the same range. `ChartSyncGroup` remains the way to keep charts in step continuously, since it also carries the price scale.
 
 ## Price Scale
 
