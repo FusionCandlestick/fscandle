@@ -1,6 +1,7 @@
 import { DEFAULT_INDICATOR_TEMPLATES, Indicator, IndicatorRenderParams, IndicatorTemplate } from './Indicator';
 import { KLineData } from '../types';
 import type { IndicatorOptions } from '../types/options';
+import { createId } from '../model/ids';
 
 export interface CreateIndicatorOptions {
   id?: string;
@@ -40,7 +41,7 @@ export class IndicatorManager {
       throw new Error(`Unknown indicator template: ${name}`);
     }
 
-    const indicator = new Indicator(options.id ?? `${template.shortName.toLowerCase()}_${Date.now()}`, {
+    const indicator = new Indicator(options.id ?? createId(template.shortName.toLowerCase()), {
       ...template,
       calcParams: options.calcParams ? [...options.calcParams] : [...template.calcParams],
       figures: template.figures.map(figure => ({ ...figure })),

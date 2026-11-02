@@ -91,6 +91,7 @@ import { renderSessionSeparators } from './renderer/sessionSeparators';
 import { renderIndicatorCrosshair } from './renderer/indicatorCrosshair';
 import { indicatorPaneRange } from './model/indicatorRange';
 import { sanitizeOverlays } from './model/overlayValidation';
+import { createId } from './model/ids';
 import { renderSeriesValueTags, renderValueTag } from './renderer/axisTags';
 import {
   renderLastPriceLine,
@@ -1141,7 +1142,7 @@ export class FusionCandlestickChart {
           ? 'vertical'
           : 'free';
       return {
-        id: 'overlay_' + Date.now(),
+        id: createId('overlay'),
         type: 'line',
         points,
         color: drawingColor,
@@ -1156,7 +1157,7 @@ export class FusionCandlestickChart {
     }
     if (family === 'channel') {
       return {
-        id: 'overlay_' + Date.now(),
+        id: createId('overlay'),
         type: 'channel',
         points,
         color: drawingColor,
@@ -1166,7 +1167,7 @@ export class FusionCandlestickChart {
     }
     if (family === 'annotation') {
       return {
-        id: 'overlay_' + Date.now(),
+        id: createId('overlay'),
         type: 'annotation',
         points,
         color: drawingColor,
@@ -1181,7 +1182,7 @@ export class FusionCandlestickChart {
     }
     if (family === 'wave') {
       return {
-        id: 'overlay_' + Date.now(),
+        id: createId('overlay'),
         type: 'wave',
         points,
         color: drawingColor,
@@ -1190,7 +1191,7 @@ export class FusionCandlestickChart {
       };
     }
     return {
-      id: 'overlay_' + Date.now(),
+      id: createId('overlay'),
       type,
       points,
       color: drawingColor,
@@ -1453,7 +1454,7 @@ export class FusionCandlestickChart {
       + this._stackedScales.countOnSide(side);
     if (sideAxisCount >= this._maxYAxisColumnsPerSide) return null;
 
-    const paneId = config.id || `stacked_${Date.now()}_${this._stackedScales.size}`;
+    const paneId = config.id || createId('stacked');
     const series = this._createSeriesByStyle(config.style || 'candle', config.options);
     series.setData(config.data);
 
@@ -2352,21 +2353,21 @@ export class FusionCandlestickChart {
   }
 
   public addKDJSeries() {
-    const kdj = new Indicator(`kdj_${Date.now()}`, KDJTemplate);
+    const kdj = new Indicator(createId('kdj'), KDJTemplate);
     let pane = this._panes[1];
     if (!pane) pane = this.addPane('indicator');
     this.addIndicator(pane.getId(), kdj);
   }
 
   public addWRSeries() {
-    const wr = new Indicator(`wr_${Date.now()}`, WRTemplate);
+    const wr = new Indicator(createId('wr'), WRTemplate);
     let pane = this._panes[1];
     if (!pane) pane = this.addPane('indicator');
     this.addIndicator(pane.getId(), wr);
   }
 
   public addVOLMASeries() {
-    const volma = new Indicator(`volma_${Date.now()}`, VOLMATemplate);
+    const volma = new Indicator(createId('volma'), VOLMATemplate);
     this.addIndicator(this._panes[0].getId(), volma);
   }
 
@@ -2985,7 +2986,7 @@ export class FusionCandlestickChart {
     this._commitActiveDrawingLayer();
     const now = Date.now();
     const layer: DrawingLayer = {
-      id: `layer_${now}_${this._drawingLayers.length}`,
+      id: createId('layer'),
       name: name || `Layer ${this._drawingLayers.length + 1}`,
       overlays: [],
       createdAt: now,
@@ -3054,7 +3055,7 @@ export class FusionCandlestickChart {
     const withDefaults = { ...templateDefaults, ...overlay };
     const normalizedOverlay: Overlay = withDefaults.id
       ? withDefaults as Overlay
-      : { ...withDefaults, id: `overlay_${Date.now()}_${this._overlayManager.getOverlays().length}` };
+      : { ...withDefaults, id: createId('overlay') };
     this._saveHistory();
     if (emitLifecycle) this._emitOverlayEvent(normalizedOverlay, 'onDrawStart');
     this._overlayManager.addOverlay(normalizedOverlay);
