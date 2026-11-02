@@ -25,6 +25,15 @@ describe('resolving a pointer to a chart region', () => {
     assert.equal(kindAt(400, 63), 'time-axis-top');
   });
 
+  it('treats the plot as starting at the toolbar when the top ruler is off (regression)', () => {
+    // With no top ruler the plot begins right under the toolbar. The region used
+    // to assume a ruler anyway, so the first 24px of plot read as a time axis.
+    const noTopRuler = { ...layout, topXAxisHeight: 0, bottomXAxisHeight: 24 };
+    assert.equal(resolvePointerRegion(400, 41, noTopRuler).kind, 'plot');
+    assert.equal(resolvePointerRegion(400, 63, noTopRuler).kind, 'plot');
+    assert.equal(resolvePointerRegion(400, 40, noTopRuler).kind, 'toolbar');
+  });
+
   it('reads the plot below the top ruler', () => {
     assert.equal(kindAt(400, 64), 'plot');
   });

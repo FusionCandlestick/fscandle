@@ -59,7 +59,8 @@ export interface InteractionHost {
   containerRect(): DOMRect;
   surfaceLayout(rect: DOMRect): ChartSurfaceLayout;
   /** Toolbar height, ruler height and gutter widths, in CSS pixels. */
-  insets(): { toolbarHeight: number; xAxisHeight: number; left: number; right: number };
+  /** Chart-area insets. The rulers are 0 when their axis is off. */
+  insets(): { toolbarHeight: number; topXAxisHeight: number; bottomXAxisHeight: number; left: number; right: number };
   panes(): Pane[];
   paneAt(containerY: number): Pane | null;
   /** Height the pane stack shares, which is what a divider drag is measured in. */
@@ -311,7 +312,7 @@ export class InteractionController {
 
     const region = resolvePointerRegion(x, y, this._host.surfaceLayout(rect));
     const chartAreaX = x - insets.left;
-    const chartAreaY = y - (insets.toolbarHeight + insets.xAxisHeight);
+    const chartAreaY = y - (insets.toolbarHeight + insets.topXAxisHeight);
     const isWithinChartAreaX = x >= insets.left && x <= rect.width - insets.right;
 
     const targetPane = this._host.paneAt(y);
@@ -409,7 +410,7 @@ export class InteractionController {
     const xRaw = clientX - rect.left;
     const yRaw = clientY - rect.top;
     const x = xRaw - insets.left;
-    const y = yRaw - (insets.toolbarHeight + insets.xAxisHeight);
+    const y = yRaw - (insets.toolbarHeight + insets.topXAxisHeight);
     this._host.setCrosshairPosition({ x, y });
 
     if (event && this._host.dispatchPrimitivePointer('pointerMove', event)) {
@@ -546,7 +547,7 @@ export class InteractionController {
     const rect = this._host.containerRect();
     const insets = this._host.insets();
     const x = e.clientX - rect.left - insets.left;
-    const y = e.clientY - rect.top - (insets.toolbarHeight + insets.xAxisHeight);
+    const y = e.clientY - rect.top - (insets.toolbarHeight + insets.topXAxisHeight);
 
     if (this._host.hasSubscribers('dblClick')) {
       this._host.emitPointerEvent('dblClick', x, y, e as unknown as PointerEvent);
@@ -581,7 +582,7 @@ export class InteractionController {
     const rect = this._host.containerRect();
     const insets = this._host.insets();
     const x = e.clientX - rect.left - insets.left;
-    const y = e.clientY - rect.top - (insets.toolbarHeight + insets.xAxisHeight);
+    const y = e.clientY - rect.top - (insets.toolbarHeight + insets.topXAxisHeight);
     if (this._host.hasSubscribers('click')) {
       this._host.emitPointerEvent('click', x, y, e);
     }
@@ -654,8 +655,8 @@ export class InteractionController {
     const isOnTopXAxis =
       isWithinChartAreaX &&
       mouseY >= insets.toolbarHeight &&
-      mouseY <= insets.toolbarHeight + insets.xAxisHeight;
-    const isOnBottomXAxis = isWithinChartAreaX && mouseY >= rect.height - insets.xAxisHeight;
+      mouseY <= insets.toolbarHeight + insets.topXAxisHeight;
+    const isOnBottomXAxis = isWithinChartAreaX && mouseY >= rect.height - insets.bottomXAxisHeight;
     if (isOnTopXAxis || isOnBottomXAxis) {
       if (canZoom) this._host.zoom(event.deltaY > 0 ? 0.95 : 1.05, chartX);
       return;
@@ -687,7 +688,7 @@ export class InteractionController {
     this._host.emitPointerEvent(
       'contextMenu',
       event.clientX - rect.left - insets.left,
-      event.clientY - rect.top - (insets.toolbarHeight + insets.xAxisHeight),
+      event.clientY - rect.top - (insets.toolbarHeight + insets.topXAxisHeight),
       event,
     );
   }
@@ -884,8 +885,8 @@ export class InteractionController {
 
   private _axisCursor(xRaw: number, yRaw: number, rect: DOMRect): string | null {
     const insets = this._host.insets();
-    const topXBottom = insets.toolbarHeight + insets.xAxisHeight;
-    const bottomXTop = rect.height - insets.xAxisHeight;
+    const topXBottom = insets.toolbarHeight + insets.topXAxisHeight;
+    const bottomXTop = rect.height - insets.bottomXAxisHeight;
     const isWithinChartAreaX = xRaw >= insets.left && xRaw <= rect.width - insets.right;
     if (isWithinChartAreaX && ((yRaw > insets.toolbarHeight && yRaw < topXBottom) || yRaw > bottomXTop)) {
       return 'ew-resize';

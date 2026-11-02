@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Pointer placement was offset when the top time ruler was off. The plot starts
+  at the toolbar in that case, but the pointer, the hit-test regions, the
+  crosshair and the inline editor assumed a ruler height above it, so a point
+  landed about 22px away from the pixel that was clicked. Plot-origin maths now
+  uses the top ruler's real height (`topXAxisHeight`), and the bottom ruler's
+  for the bottom edge.
+- Magnet snapping had no distance limit, so a point far below the lowest low
+  still snapped to it. Snapping now applies only within 12px of an OHLC value;
+  beyond that the pointer's price is kept.
+
 ## [0.1.1] - 2026-11-03
 
 ### Security

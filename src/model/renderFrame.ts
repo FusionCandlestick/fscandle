@@ -45,7 +45,10 @@ export interface ChartFrameInput {
   width: number;
   height: number;
   toolbarHeight: number;
+  /** Height of one time ruler. The top ruler's height, when set, takes precedence for the plot origin. */
   xAxisHeight: number;
+  /** The top ruler actually drawn: 0 when the top axis is off. Defaults to xAxisHeight. */
+  topXAxisHeight?: number;
   leftGutter: number;
   rightGutter: number;
   panes: PaneFrameInput[];
@@ -103,7 +106,7 @@ export interface ChartFrame {
 export function buildChartFrame(input: ChartFrameInput): ChartFrame {
   const plotOrigin = {
     left: input.leftGutter,
-    top: input.toolbarHeight + input.xAxisHeight,
+    top: input.toolbarHeight + (input.topXAxisHeight ?? input.xAxisHeight),
   };
 
   const panes = input.panes.map((pane, index) => {

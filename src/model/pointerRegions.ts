@@ -31,6 +31,9 @@ export interface ChartSurfaceLayout {
   toolbarHeight: number;
   /** Height of one time-axis ruler; there is one at the top and one at the bottom. */
   xAxisHeight: number;
+  /** The rulers actually drawn. Each is 0 when its axis is off; defaults to xAxisHeight. */
+  topXAxisHeight?: number;
+  bottomXAxisHeight?: number;
   leftGutter: number;
   rightGutter: number;
 }
@@ -59,8 +62,8 @@ export function resolvePointerRegion(
   if (y <= layout.toolbarHeight) return { kind: 'toolbar' };
 
   const withinPlotWidth = x >= layout.leftGutter && x <= layout.width - layout.rightGutter;
-  const topRulerBottom = layout.toolbarHeight + layout.xAxisHeight;
-  const bottomRulerTop = layout.height - layout.xAxisHeight;
+  const topRulerBottom = layout.toolbarHeight + (layout.topXAxisHeight ?? layout.xAxisHeight);
+  const bottomRulerTop = layout.height - (layout.bottomXAxisHeight ?? layout.xAxisHeight);
 
   if (withinPlotWidth && y < topRulerBottom) return { kind: 'time-axis-top' };
   if (withinPlotWidth && y > bottomRulerTop) return { kind: 'time-axis-bottom' };

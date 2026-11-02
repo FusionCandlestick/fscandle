@@ -195,7 +195,7 @@ describe('renderMainPaneCrosshair', () => {
       scales: [{ id: 'main', side: 'right', axisIndex: 0, transformer }],
       primaryTransformer: transformer,
       pane: { bounding: { width: 1000, height: 500, left: 0, top: 100 }, width: 1000, height: 500, isBottom: true },
-      geometry: { toolbarHeight: 0, xAxisHeight: 22, leftYAxisWidth: 0 },
+      geometry: { toolbarHeight: 0, topXAxisHeight: 22, xAxisHeight: 22, leftYAxisWidth: 0 },
       // Bar 10, and a y that the pane's top offset turns into local y 72.
       crosshair: { x: transformer.indexToX(10), y: 150 },
       style: { visible: true, color: '#758696', style: 'dashed' },

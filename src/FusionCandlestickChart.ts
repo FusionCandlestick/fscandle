@@ -263,6 +263,11 @@ function mergeChartOptions(base: ChartOptions, overrides: DeepPartial<ChartOptio
 }
 
 /**
+ * How close, in pixels, a pointer must be to an OHLC value for magnet mode to snap to it.
+ */
+const MAGNET_SNAP_PX = 12;
+
+/**
  * Rendering invalidation levels to optimize performance.
  */
 export enum InvalidationLevel {
@@ -917,6 +922,8 @@ export class FusionCandlestickChart {
       height,
       toolbarHeight: this._toolbarHeight,
       xAxisHeight: this._xAxisHeight,
+      topXAxisHeight: this._topXHeight,
+      bottomXAxisHeight: this._bottomXHeight,
       leftGutter: this._leftYAxisWidth,
       rightGutter: this._rightYAxisWidth,
     };
@@ -1084,7 +1091,7 @@ export class FusionCandlestickChart {
   }
 
   private _getPaneLocalY(chartY: number, paneTop: number) {
-    return chartY - (paneTop - (this._toolbarHeight + this._xAxisHeight));
+    return chartY - (paneTop - (this._toolbarHeight + this._topXHeight));
   }
 
   private _getRequiredDrawingPointCount(type: string | null) {
@@ -1246,15 +1253,14 @@ export class FusionCandlestickChart {
       return { index, time: coordinateTimestamp ?? snapData.timestamp, price };
     }
 
-    // Magnet: snap to nearest OHLC value
+    // Magnet: snap to the nearest OHLC value, but only when one is close enough
+    // to the pointer to be what the user meant. Otherwise the point stays where
+    // it was placed. The search used to start from an infinite distance, so the
+    // nearest value always won however far it was: a click in empty space was
+    // pulled to a bar many units away.
     const barSpacing = Math.max(transformer.getBarSpacing(), 1);
-    const neighborRadius = Math.max(1, Math.ceil(18 / barSpacing));
-    let bestMatch = {
-      index,
-      time: snapData.timestamp,
-      price,
-      distanceSq: Number.POSITIVE_INFINITY,
-    };
+    const neighborRadius = Math.max(1, Math.ceil(MAGNET_SNAP_PX / barSpacing));
+    let bestMatch: { index: number; time: number; price: number; distanceSq: number } | null = null;
 
     for (let candidateIndex = Math.max(0, index - neighborRadius); candidateIndex <= Math.min(data.length - 1, index + neighborRadius); candidateIndex++) {
       const candidateData = this._getPrimarySnapData(candidateIndex) || data[candidateIndex];
@@ -1263,12 +1269,12 @@ export class FusionCandlestickChart {
       const candidateX = transformer.indexToX(candidateIndex);
       const ohlcValues = [candidateData.open, candidateData.high, candidateData.low, candidateData.close];
 
-      ohlcValues.forEach(candidatePrice => {
+      for (const candidatePrice of ohlcValues) {
         const candidateY = transformer.priceToY(candidatePrice);
         const dx = candidateX - clampedX;
         const dy = candidateY - chartY;
         const distanceSq = dx * dx + dy * dy;
-        if (distanceSq < bestMatch.distanceSq) {
+        if (!bestMatch || distanceSq < bestMatch.distanceSq) {
           bestMatch = {
             index: candidateIndex,
             time: candidateData.timestamp,
@@ -1276,10 +1282,14 @@ export class FusionCandlestickChart {
             distanceSq,
           };
         }
-      });
+      }
     }
 
-    return { index: bestMatch.index, time: bestMatch.time, price: bestMatch.price };
+    if (!bestMatch || bestMatch.distanceSq > MAGNET_SNAP_PX * MAGNET_SNAP_PX) {
+      return { index, time: coordinateTimestamp ?? snapData.timestamp, price };
+    }
+    const snapped: { index: number; time: number; price: number; distanceSq: number } = bestMatch;
+    return { index: snapped.index, time: snapped.time, price: snapped.price };
   }
 
   private _getSeriesStyle(series: BaseSeries | null): ConfigurablePriceSeriesStyle | null {
@@ -1311,8 +1321,8 @@ export class FusionCandlestickChart {
     const rect = this._container.getBoundingClientRect();
     const containerX = event.clientX - rect.left;
     const containerY = event.clientY - rect.top;
-    const topXBottom = this._toolbarHeight + this._xAxisHeight;
-    const bottomXTop = rect.height - this._xAxisHeight;
+    const topXBottom = this._toolbarHeight + this._topXHeight;
+    const bottomXTop = rect.height - this._bottomXHeight;
     const chartX = this._getPaneLocalX(containerX);
     const chartY = containerY - topXBottom;
     const isWithinChartAreaX = containerX >= this._leftYAxisWidth && containerX <= rect.width - this._rightYAxisWidth;
@@ -1524,7 +1534,8 @@ export class FusionCandlestickChart {
       surfaceLayout: rect => this._surfaceLayout(rect),
       insets: () => ({
         toolbarHeight: this._toolbarHeight,
-        xAxisHeight: this._xAxisHeight,
+        topXAxisHeight: this._topXHeight,
+        bottomXAxisHeight: this._bottomXHeight,
         left: this._leftYAxisWidth,
         right: this._rightYAxisWidth,
       }),
@@ -1704,7 +1715,7 @@ export class FusionCandlestickChart {
     }
 
     const screenLeft = targetX + this._leftYAxisWidth;
-    const screenTop = targetY + (this._toolbarHeight + this._xAxisHeight);
+    const screenTop = targetY + (this._toolbarHeight + this._topXHeight);
 
     const input = document.createElement('input');
     input.className = 'fusion-overlay-inline-editor';
@@ -1979,7 +1990,7 @@ export class FusionCandlestickChart {
     if (!this._drawingOverlay) return;
     const pane = this._panes[0];
     this._preparePaneTransformer(pane);
-    const localY = this._getPaneLocalY(chartY, pane ? pane.getBounding().top : this._toolbarHeight + this._xAxisHeight);
+    const localY = this._getPaneLocalY(chartY, pane ? pane.getBounding().top : this._toolbarHeight + this._topXHeight);
     const snappedPoint = this._resolveDrawingPoint(chartX, localY, pane?.getId() || 'main');
 
     const previewIndex = Math.max(this._drawingFixedPointCount, this._drawingOverlay.points.length - 1);
@@ -3814,6 +3825,7 @@ export class FusionCandlestickChart {
       height: this._container.clientHeight,
       toolbarHeight: this._toolbarHeight,
       xAxisHeight: this._xAxisHeight,
+      topXAxisHeight: this._topXHeight,
       leftGutter: this._leftYAxisWidth,
       rightGutter: this._rightYAxisWidth,
       panes: this._panes.map(pane => ({
@@ -4059,7 +4071,7 @@ export class FusionCandlestickChart {
       scales: priceScales,
       primaryTransformer: primaryScale.transformer,
       pane: { bounding, width: realWidth, height: realHeight, isBottom: paneFrame.isLast },
-      geometry: { toolbarHeight: this._toolbarHeight, xAxisHeight: this._xAxisHeight, leftYAxisWidth: this._leftYAxisWidth },
+      geometry: { toolbarHeight: this._toolbarHeight, topXAxisHeight: this._topXHeight, xAxisHeight: this._xAxisHeight, leftYAxisWidth: this._leftYAxisWidth },
       crosshair: this._crosshairPos || this._remoteCrosshairPos,
       style: { visible: this._options.crosshair.visible, color: this._options.crosshair.color, style: this._options.crosshair.style },
       isHidden: id => this._hiddenSeriesIds.has(id),

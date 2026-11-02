@@ -30,7 +30,8 @@ export interface MainPaneCrosshairInput {
   scales: readonly CrosshairScale[];
   primaryTransformer: CoordinateTransformer;
   pane: { bounding: Bounding; width: number; height: number; isBottom: boolean };
-  geometry: { toolbarHeight: number; xAxisHeight: number; leftYAxisWidth: number };
+  /** `topXAxisHeight` is the top ruler actually drawn (0 when off); `xAxisHeight` is one ruler's height. */
+  geometry: { toolbarHeight: number; topXAxisHeight: number; xAxisHeight: number; leftYAxisWidth: number };
   /** Where the crosshair is, in chart coordinates, or null when it is not shown. */
   crosshair: { x: number; y: number } | null;
   style: CrosshairLineStyle & { visible: boolean };
@@ -55,7 +56,7 @@ export function renderMainPaneCrosshair(input: MainPaneCrosshairInput): void {
   if (!style.visible || !crosshair) return;
 
   const localX = crosshair.x;
-  const localY = crosshair.y - (pane.bounding.top - (geometry.toolbarHeight + geometry.xAxisHeight));
+  const localY = crosshair.y - (pane.bounding.top - (geometry.toolbarHeight + geometry.topXAxisHeight));
   if (localY < 0 || localY > pane.height) return;
 
   input.chrome.drawCrosshair(canvases.overlay, pane.width, pane.height, { x: localX, y: localY });
