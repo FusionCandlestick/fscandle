@@ -31,9 +31,8 @@ test('re-rendering with equal options keeps the same chart', async ({ page }) =>
 test('a live bar is appended without rebuilding the chart', async ({ page }) => {
   opened = await mount(page, { data: BARS.slice(0, 299), options: NO_PERSISTENCE });
   await page.evaluate(bars => window.renderChart({ data: bars }), BARS);
-  await page.evaluate(() => new Promise(requestAnimationFrame));
-  const state = await page.evaluate(() => ({ ready: window.reactEvents.ready, bars: window.reactChart?.getData().length }));
-  expect(state).toEqual({ ready: 1, bars: 300 });
+  await expect.poll(() => page.evaluate(() => window.reactChart?.getData().length)).toBe(300);
+  expect(await page.evaluate(() => window.reactEvents.ready)).toBe(1);
 });
 
 test('the overlays prop is reconciled by id, without duplicates', async ({ page }) => {
@@ -46,8 +45,10 @@ test('the overlays prop is reconciled by id, without duplicates', async ({ page 
   };
   opened = await mount(page, { data: BARS, options: NO_PERSISTENCE, overlays: [overlay] });
   await page.evaluate(next => window.renderChart({ overlays: [next] }), { ...overlay, color: '#0ff' });
-  const overlays = await page.evaluate(() => window.reactChart?.getOverlays().map(o => [o.id, o.color]));
-  expect(overlays).toEqual([['o1', '#0ff']]);
+  // React applies the new props in an effect, after this call returns.
+  await expect
+    .poll(() => page.evaluate(() => window.reactChart?.getOverlays().map(o => [o.id, o.color])))
+    .toEqual([['o1', '#0ff']]);
 });
 
 /** Drag the trading line at `price` up by 30 pixels. */
