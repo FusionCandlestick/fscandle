@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.1] - 2026-11-03
 
 ### Security
 
@@ -31,7 +31,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   end where the right margin begins rather than at the plot's right edge, so
   `to` is slightly smaller than before. This matches what
   `setVisibleLogicalRange()` takes.
-
 - `FusionCandlestickChartComponent` keeps one chart instance per mount. Prop
   changes update it in place instead of destroying and rebuilding it, so
   re-rendering no longer resets the viewport or repeats setup work. Live bars
@@ -48,6 +47,47 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `overlays` to show them.
 
 ### Fixed
+
+- Volume series preserves unavailable volume in series scaling, ignoring
+  non-finite, missing, or negative volumes so zero/missing volume does not
+  distort autoscale.
+- Indicator removal now emits an `indicatorRemoved` event (`{ paneId, indicatorId }`)
+  on EventBus and chart facade, allowing UI layers to sync state reliably.
+- One malformed overlay (for example, one without points) threw on every frame,
+  and because state is saved back, on every later load as well. Such overlays
+  are now dropped on load and import, and an overlay whose template throws is
+  skipped until it changes instead of stopping the frame.
+- Undo and redo dropped overlay callbacks, so after one undo, overlays lost
+  `onClick`, `onPressedMoving` and the rest, and React trading lines stopped
+  reporting drags.
+- Overlays created in the same millisecond could share an id, and removing one
+  removed both. Ids for overlays, drawing layers, stacked panes and indicators
+  are now unique.
+- The polling feed delivered bars from a request that finished after the caller
+  unsubscribed, and then reported `streaming` after `closed`. `destroy()` now
+  stops in-flight requests too. The WebSocket feed ignores messages that arrive
+  after unsubscribe.
+- Passing `getVisibleLogicalRange()` back to `setVisibleLogicalRange()` widened
+  the range by the right margin (about 5%) on every round trip, so code syncing
+  panels through the two drifted out. The pair now round-trips exactly.
+- Overlays passed in `overlays` were duplicated each time the chart was rebuilt;
+  they are now reconciled by `id`.
+- `FusionCandlestickChartComponent` trading lines (`tradingLines`) were never
+  drawn or draggable: they used an overlay type (`price_line`) that no template
+  registered. They are now a dedicated `trading_line` overlay: a full-width
+  horizontal line with a price tag (`label` is shown), draggable through
+  `onTradingLineDrag` unless `draggable: false`, which locks it.
+- Trading lines are restored after the chart is rebuilt, and removing a line
+  from `tradingLines` now removes it from the chart.
+
+### Added
+
+- Retained shared canonical bar adapter vectors fixture for comprehensive
+  data ingestion testing across projects.
+- Browser tests for the public chart API and the React component
+  (`npm run test:browser`), with a regression test for each fix above.
+- API documentation for price lines, markers, undo/redo, drawing import and
+  export, `setTheme`, data feeds, and the visible-range semantics.
 
 - One malformed overlay (for example, one without points) threw on every frame,
   and because state is saved back, on every later load as well. Such overlays
@@ -137,4 +177,5 @@ yet pluggable, visual regression is a single baseline rather than a matrix, and
 the indicator catalog is narrower than KLineCharts'. See the "Known Gaps"
 section of [README.md](README.md).
 
+[0.1.1]: https://github.com/FusionCandlestick/fscandle/releases/tag/v0.1.1
 [0.1.0]: https://github.com/FusionCandlestick/fscandle/releases/tag/v0.1.0
