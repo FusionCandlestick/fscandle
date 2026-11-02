@@ -42,6 +42,9 @@ jobs:
       - name: Stability Probe
         run: npm run build:library && npm run test:stability
 
+      - name: Browser Tests
+        run: npm run test:browser
+
       - name: Security Audit
         run: npm run audit:ci
 

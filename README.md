@@ -89,6 +89,7 @@ npm run build:library   # emits dist/ (ESM + CJS + .d.ts) via tsup
 npm run typecheck        # tsc over src and tests (type checking only, no output)
 npm run test             # typecheck + unit + source smoke + perf smoke
 npm run test:unit        # transpile with esbuild, then Node's test runner (about 2 seconds)
+npm run test:browser     # chart API and React component in Chromium (Playwright, about 12 seconds)
 npm run release:check    # lint, typecheck, all tests, audit, bundle build, artifact smoke
 ```
 
@@ -96,11 +97,14 @@ The unit-test build is transpile-only (`scripts/build-tests.mjs`), so it is fast
 type errors in tests are caught by `npm run typecheck`. Shared fixtures live in
 `tests/support/fixtures.ts`.
 
-The stability probe launches Playwright's bundled Chromium. Where that is not
-installed, point it at another binary:
+The browser tests (`tests/browser/`) cover the public chart API and the React
+component in a real canvas, including a regression test for each fixed bug.
+
+The stability probe and the browser tests launch Playwright's bundled Chromium.
+Where that is not installed, point them at another binary:
 
 ```bash
-FSCANDLE_CHROMIUM=/path/to/chromium npm run test:stability
+FSCANDLE_CHROMIUM=/path/to/chromium npm run test:browser
 ```
 
 Unit tests cover period parsing, timezone boundaries, trading sessions, time

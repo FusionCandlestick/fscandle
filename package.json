@@ -67,15 +67,16 @@
     "build:library": "tsup",
     "prepare": "npm run build:library",
     "lint": "eslint",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json --noEmit && tsc -p tsconfig.browser.json",
     "test:smoke": "node tests/smoke/source-contract-smoke.mjs",
     "test:package": "node tests/smoke/package-artifact-smoke.mjs",
     "test:perf": "node tests/performance/chart-engine-benchmark.mjs",
     "test:stability": "node tests/performance/stability-probe.mjs",
     "audit:ci": "npm audit --omit=dev --audit-level high",
     "test": "npm run typecheck && npm run test:unit && npm run test:smoke && npm run test:perf",
-    "release:check": "npm run lint && npm run typecheck && npm run test:unit && npm run test:smoke && npm run test:perf && npm run test:stability && npm run audit:ci && npm run build:library && npm run test:package",
-    "test:unit": "node scripts/build-tests.mjs && node --test \".test-build/tests/unit/*.test.js\""
+    "release:check": "npm run lint && npm run typecheck && npm run test:unit && npm run test:smoke && npm run test:perf && npm run test:stability && npm run test:browser && npm run audit:ci && npm run build:library && npm run test:package",
+    "test:unit": "node scripts/build-tests.mjs && node --test \".test-build/tests/unit/*.test.js\"",
+    "test:browser": "playwright test"
   },
   "dependencies": {
     "technicalindicators": "^3.1.0"

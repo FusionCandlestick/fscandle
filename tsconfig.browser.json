@@ -1,0 +1,12 @@
+{
+  // Type checking for the browser tests and the Playwright config. Playwright
+  // transpiles these itself, so this file is only used by `npm run typecheck`.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "incremental": false,
+    "types": ["node"]
+  },
+  "include": ["tests/browser/**/*.ts", "tests/browser/**/*.tsx", "playwright.config.ts"],
+  "exclude": ["node_modules", "tests/browser/.artifacts"]
+}
