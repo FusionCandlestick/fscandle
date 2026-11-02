@@ -1,6 +1,6 @@
 {
   "name": "fscandle",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": false,
   "description": "Free-form HTML5 Canvas K-line (candlestick) chart engine with a custom renderer, framework-neutral and React entry points, and datafeed helpers.",
   "license": "SEE LICENSE IN LICENSE",

@@ -150,14 +150,32 @@ export function createPollingDataFeed(options: PollingDataFeedOptions): MarketDa
   };
 }
 
+export interface WebSocketReconnectOptions {
+  /** Delay before the first retry, in milliseconds. Default 1000. */
+  initialDelayMs?: number;
+  /** Upper bound for the delay between retries. Default 30000. */
+  maxDelayMs?: number;
+  /** Retries before giving up and reporting `closed`. Default: no limit. */
+  maxAttempts?: number;
+}
+
 export interface WebSocketDataFeedOptions {
   url: string | ((request: MarketDataRequest) => string);
   subscribeMessage?: (request: MarketDataRequest) => unknown;
   parseMessage: (payload: unknown) => RawKLineInput | RawKLineInput[] | null;
+  /**
+   * Reconnect after an unexpected close, with exponential backoff. The status
+   * reads `reconnecting` while waiting. Pass `false` to report `closed` instead.
+   */
+  reconnect?: false | WebSocketReconnectOptions;
 }
 
 export function createWebSocketDataFeed(options: WebSocketDataFeedOptions): MarketDataFeed {
-  const sockets = new Set<WebSocket>();
+  const reconnect = options.reconnect === false
+    ? null
+    : { initialDelayMs: 1000, maxDelayMs: 30_000, maxAttempts: Number.POSITIVE_INFINITY, ...options.reconnect };
+  /** Stops every live subscription, without reporting its status. */
+  const halts = new Set<() => void>();
 
   return {
     async getHistory() {
@@ -165,61 +183,105 @@ export function createWebSocketDataFeed(options: WebSocketDataFeedOptions): Mark
     },
 
     subscribe(subscription: MarketDataSubscription) {
-      const url = typeof options.url === 'function' ? options.url(subscription) : options.url;
-      const socket = new WebSocket(url);
-      sockets.add(socket);
+      let socket: WebSocket | null = null;
+      let retryTimer: ReturnType<typeof setTimeout> | null = null;
+      let attempts = 0;
+      let stopped = false;
 
-      socket.addEventListener('open', () => {
-        subscription.onStatusChange?.('streaming');
-        const message = options.subscribeMessage?.(subscription);
-        if (message !== undefined) socket.send(JSON.stringify(message));
-      });
+      const stop = () => {
+        stopped = true;
+        halts.delete(halt);
+        if (retryTimer !== null) clearTimeout(retryTimer);
+        retryTimer = null;
+        // Clear the reference first, so the close event this causes is ignored.
+        const current = socket;
+        socket = null;
+        current?.close();
+      };
 
-      let isDisposed = false;
+      const halt = () => {
+        if (!stopped) stop();
+      };
 
-      socket.addEventListener('message', event => {
-        // Messages can still arrive between close() and the socket closing.
-        if (isDisposed) return;
-        try {
-          const payload = JSON.parse(event.data);
-          const parsed = options.parseMessage(payload);
-          const bars: RawKLineInput[] = parsed === null
-            ? []
-            : isTupleBar(parsed)
-              ? [parsed]
-              : Array.isArray(parsed)
-                ? parsed
-                : [parsed];
-          bars.map(bar => normalizeKLineData(bar)).forEach(subscription.onUpdate);
-        } catch (error) {
-          subscription.onStatusChange?.('error');
-          subscription.onError?.(error instanceof Error ? error : new Error(String(error)));
+      const scheduleRetry = () => {
+        if (!reconnect || attempts >= reconnect.maxAttempts) {
+          if (reconnect) {
+            subscription.onError?.(new Error(`Market data websocket gave up after ${attempts} reconnect attempts`));
+          }
+          stop();
+          subscription.onStatusChange?.('closed');
+          return;
         }
-      });
+        const delay = Math.min(reconnect.maxDelayMs, reconnect.initialDelayMs * 2 ** attempts);
+        attempts += 1;
+        subscription.onStatusChange?.('reconnecting');
+        retryTimer = setTimeout(() => {
+          retryTimer = null;
+          if (!stopped) connect();
+        }, delay);
+      };
 
-      socket.addEventListener('close', () => {
-        sockets.delete(socket);
-        // A close the caller asked for has already been reported.
-        if (!isDisposed) subscription.onStatusChange?.('closed');
-      });
-      socket.addEventListener('error', () => {
-        if (isDisposed) return;
-        subscription.onStatusChange?.('error');
-        subscription.onError?.(new Error('Market data websocket error'));
-      });
+      const connect = () => {
+        const url = typeof options.url === 'function' ? options.url(subscription) : options.url;
+        const ws = new WebSocket(url);
+        socket = ws;
 
-      return () => {
-        if (isDisposed) return;
-        isDisposed = true;
-        socket.close();
-        sockets.delete(socket);
+        ws.addEventListener('open', () => {
+          if (stopped || socket !== ws) return;
+          attempts = 0;
+          subscription.onStatusChange?.('streaming');
+          const message = options.subscribeMessage?.(subscription);
+          if (message !== undefined) ws.send(JSON.stringify(message));
+        });
+
+        ws.addEventListener('message', event => {
+          // Messages can still arrive between close() and the socket closing.
+          if (stopped || socket !== ws) return;
+          try {
+            const payload = JSON.parse(event.data);
+            const parsed = options.parseMessage(payload);
+            const bars: RawKLineInput[] = parsed === null
+              ? []
+              : isTupleBar(parsed)
+                ? [parsed]
+                : Array.isArray(parsed)
+                  ? parsed
+                  : [parsed];
+            bars.map(bar => normalizeKLineData(bar)).forEach(subscription.onUpdate);
+          } catch (error) {
+            subscription.onStatusChange?.('error');
+            subscription.onError?.(error instanceof Error ? error : new Error(String(error)));
+          }
+        });
+
+        ws.addEventListener('close', () => {
+          // A close we asked for leaves socket already cleared.
+          if (stopped || socket !== ws) return;
+          socket = null;
+          scheduleRetry();
+        });
+
+        ws.addEventListener('error', () => {
+          if (stopped || socket !== ws) return;
+          subscription.onStatusChange?.('error');
+          subscription.onError?.(new Error('Market data websocket error'));
+        });
+      };
+
+      const dispose = () => {
+        if (stopped) return;
+        stop();
         subscription.onStatusChange?.('closed');
       };
+
+      halts.add(halt);
+      connect();
+      return dispose;
     },
 
     destroy() {
-      sockets.forEach(socket => socket.close());
-      sockets.clear();
+      [...halts].forEach(halt => halt());
+      halts.clear();
     },
   };
 }

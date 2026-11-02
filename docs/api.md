@@ -544,7 +544,7 @@ feed.destroy?.();
 `bindMarketDataFeed` loads history with `setData`, then applies each live bar with `updateData`. The function it resolves to unsubscribes.
 
 - **Polling** (`createPollingDataFeed`) runs one request at a time: a poll is skipped while the previous one is still in flight. Bars older than the newest one delivered are ignored. After the subscription is disposed, or the feed destroyed, a response that was still in flight is dropped rather than delivered.
-- **WebSocket** (`createWebSocketDataFeed`) parses each message with your `parseMessage`. It has no history (`getHistory` resolves to `[]`) and does not reconnect; a dropped connection reports `closed`, and reconnecting is the caller's choice. Messages that arrive after you unsubscribe are ignored.
+- **WebSocket** (`createWebSocketDataFeed`) parses each message with your `parseMessage`. It has no history (`getHistory` resolves to `[]`). After an unexpected close it reconnects with exponential backoff, starting at 1 s and doubling up to 30 s; the status reads `reconnecting` while it waits and `streaming` once the socket opens again. Set `reconnect` to tune the delays or the number of attempts, or `reconnect: false` to report `closed` instead. Once the attempts run out, it reports `closed` with an error. `unsubscribe` and `destroy()` cancel a pending retry. Messages that arrive after you unsubscribe are ignored.
 - Building endpoint URLs is the caller's job, including escaping the symbol.
 
 `mergeSymbolContextEventMarkers(candles, events)` puts events from any symbol-context feed onto their bars as the per-bar `marker` the candlestick series draws.

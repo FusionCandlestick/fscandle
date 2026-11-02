@@ -73,6 +73,5 @@ Numeric timestamps below `10_000_000_000` are treated as seconds; larger values 
 ## Known Gaps
 
 - No packaged Binance, Coinbase, Polygon, Alpaca, or broker-specific adapters yet.
-- No built-in reconnect backoff strategy for websocket feeds.
 - No server-side proxy route is included; production apps should keep exchange secrets out of the browser.
 - No schema validation dependency is bundled; adapter callbacks should validate provider payloads before returning rows.
