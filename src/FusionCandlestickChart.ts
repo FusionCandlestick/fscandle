@@ -89,6 +89,7 @@ import { renderSeriesBeacons } from './renderer/seriesBeacons';
 import { renderSessionSeparators } from './renderer/sessionSeparators';
 import { renderIndicatorCrosshair } from './renderer/indicatorCrosshair';
 import { indicatorPaneRange } from './model/indicatorRange';
+import { sanitizeOverlays } from './model/overlayValidation';
 import { renderSeriesValueTags, renderValueTag } from './renderer/axisTags';
 import {
   renderLastPriceLine,
@@ -3252,7 +3253,9 @@ export class FusionCandlestickChart {
             this._applyStructuralOptions();
         }
         if (Array.isArray(state.drawingLayers)) {
-            const layers = normalizeDrawingLayers(state.drawingLayers as Partial<DrawingLayer>[]);
+            const layers = normalizeDrawingLayers(state.drawingLayers as Partial<DrawingLayer>[], Date.now(), count => {
+              console.warn(`[fscandle] Dropped ${count} saved drawing(s) that could not be drawn.`);
+            });
             if (layers.length > 0) {
               this._drawingLayers = layers;
               this._activeDrawingLayerId = layers.some(layer => layer.id === state.activeDrawingLayerId)
@@ -4686,22 +4689,39 @@ export class FusionCandlestickChart {
     URL.revokeObjectURL(url);
   }
 
-  /** Import overlays from a JSON string (as exported by exportOverlaysJSON) */
+  /**
+   * Import overlays from a JSON string (as exported by exportOverlaysJSON).
+   *
+   * The file is untrusted: every overlay is validated, and ones that could not
+   * be drawn are skipped with a console warning. Throws when the input is not a
+   * drawing export, or when it lists overlays and none of them is usable; the
+   * chart is left unchanged in that case.
+   */
   public importOverlaysJSON(json: string) {
-    const parsed = JSON.parse(json);
-    this._saveHistory();
-    if (Array.isArray(parsed.drawingLayers)) {
-      const layers = normalizeDrawingLayers(parsed.drawingLayers);
+    const parsed: unknown = JSON.parse(json);
+    if (typeof parsed !== 'object' || parsed === null) throw new Error('Invalid format');
+    const record = parsed as Record<string, unknown>;
+    const warnSkipped = (count: number) => {
+      console.warn(`[fscandle] Skipped ${count} imported drawing(s) that could not be drawn.`);
+    };
+
+    if (!Array.isArray(parsed) && Array.isArray(record.drawingLayers)) {
+      const layers = normalizeDrawingLayers(record.drawingLayers as Partial<DrawingLayer>[], Date.now(), warnSkipped);
       if (layers.length === 0) throw new Error('Invalid format');
+      this._saveHistory();
       this._drawingLayers = layers;
-      this._activeDrawingLayerId = layers.some(layer => layer.id === parsed.activeDrawingLayerId)
-        ? parsed.activeDrawingLayerId
+      this._activeDrawingLayerId = layers.some(layer => layer.id === record.activeDrawingLayerId)
+        ? (record.activeDrawingLayerId as string)
         : layers[0].id;
       const activeLayer = layers.find(layer => layer.id === this._activeDrawingLayerId) ?? layers[0];
       this._overlayManager.setOverlays(activeLayer.overlays.map(overlay => ({ ...overlay })));
     } else {
-      const overlays = (parsed.overlays || parsed) as Overlay[];
-      if (!Array.isArray(overlays)) throw new Error('Invalid format');
+      const raw = Array.isArray(parsed) ? parsed : record.overlays;
+      if (!Array.isArray(raw)) throw new Error('Invalid format');
+      const { overlays, rejected } = sanitizeOverlays(raw);
+      if (raw.length > 0 && overlays.length === 0) throw new Error('Invalid format: no drawable overlays');
+      if (rejected > 0) warnSkipped(rejected);
+      this._saveHistory();
       this._overlayManager.setOverlays(overlays);
       this._commitActiveDrawingLayer();
     }

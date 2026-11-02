@@ -5,6 +5,7 @@
 
 import type { PriceScaleMode } from '../engine/CoordinateTransformer';
 import type { Overlay } from '../engine/OverlayManager';
+import { sanitizeOverlays } from '../model/overlayValidation';
 
 export const PERSISTED_STATE_VERSION = 4;
 
@@ -45,19 +46,29 @@ export function parsePersistedState(raw: string | null): PersistedChartState | n
 /**
  * Coerce stored drawing layers into complete ones. Layers without an
  * `overlays` array are dropped; missing ids, names and timestamps are filled in.
- * `now` is the fallback timestamp, passed in so the result is deterministic.
+ * Each overlay is validated, and ones that could not be drawn are dropped and
+ * counted through `onRejected`. `now` is the fallback timestamp, passed in so
+ * the result is deterministic.
  */
 export function normalizeDrawingLayers(
   layers: Array<Partial<StoredDrawingLayer>>,
   now: number = Date.now(),
+  onRejected?: (count: number) => void,
 ): StoredDrawingLayer[] {
-  return layers
+  let rejected = 0;
+  const normalized = layers
     .filter(layer => Array.isArray(layer.overlays))
-    .map((layer, index) => ({
-      id: typeof layer.id === 'string' && layer.id ? layer.id : `layer_${now}_${index}`,
-      name: typeof layer.name === 'string' && layer.name ? layer.name : `Layer ${index + 1}`,
-      overlays: layer.overlays as Overlay[],
-      createdAt: typeof layer.createdAt === 'number' ? layer.createdAt : now,
-      updatedAt: typeof layer.updatedAt === 'number' ? layer.updatedAt : now,
-    }));
+    .map((layer, index) => {
+      const { overlays, rejected: dropped } = sanitizeOverlays(layer.overlays);
+      rejected += dropped;
+      return {
+        id: typeof layer.id === 'string' && layer.id ? layer.id : `layer_${now}_${index}`,
+        name: typeof layer.name === 'string' && layer.name ? layer.name : `Layer ${index + 1}`,
+        overlays,
+        createdAt: typeof layer.createdAt === 'number' ? layer.createdAt : now,
+        updatedAt: typeof layer.updatedAt === 'number' ? layer.updatedAt : now,
+      };
+    });
+  if (rejected > 0) onRejected?.(rejected);
+  return normalized;
 }

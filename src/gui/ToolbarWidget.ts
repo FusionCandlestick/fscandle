@@ -1,5 +1,6 @@
 import type { PriceScaleMode } from '../engine/CoordinateTransformer';
-import type { ToolbarHost } from './types';
+import type { ToolbarContentItem, ToolbarHost } from './types';
+import { escapeHtml, safeCssColor } from './html';
 
 const ICON = {
   series:
@@ -468,24 +469,11 @@ export class ToolbarWidget {
   public updateContentList() {
     if (!this._contentContainer) return;
 
-    const items = this._host.getToolbarContentItems();
-    const textColor = this._textColor();
-
-    const html =
-      items.length === 0
-        ? `<span style="color: ${textColor}; font-size: 10px; opacity: 0.65; white-space: nowrap;">${this._host.t('toolbar.noVisibleContent')}</span>`
-        : items
-            .map(item => {
-              const paneAttr = item.paneId ? ` data-pane="${item.paneId}"` : '';
-              return `<div style="display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; border-radius: 999px; border: 1px solid rgba(128,128,128,0.22); background: rgba(128,128,128,0.08); color: ${item.color}; font-size: 10px; white-space: nowrap;">
-            <span style="pointer-events: none; max-width: 140px; overflow: hidden; text-overflow: ellipsis;">${item.label}</span>
-            <button class="fscandle-toolbar-remove" data-kind="${item.kind}" data-id="${item.id}"${paneAttr}
-              style="display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; padding: 0; border: none; background: transparent; color: ${item.color}; cursor: pointer; opacity: 0.75;">
-              ${ICON.close}
-            </button>
-          </div>`;
-            })
-            .join('');
+    const html = toolbarContentHtml(
+      this._host.getToolbarContentItems(),
+      this._textColor(),
+      this._host.t('toolbar.noVisibleContent'),
+    );
 
     if (this._contentContainer.innerHTML === html) return;
     this._contentContainer.innerHTML = html;
@@ -505,4 +493,29 @@ export class ToolbarWidget {
         });
       });
   }
+}
+
+/**
+ * The chips listing what is on the chart. Every label, id and colour is escaped
+ * or validated: overlay ids and types can come from imported drawings, and a
+ * quote in one would otherwise break out of its attribute.
+ */
+export function toolbarContentHtml(items: ToolbarContentItem[], textColor: string, emptyText: string): string {
+  const text = safeCssColor(textColor, 'inherit');
+  if (items.length === 0) {
+    return `<span style="color: ${text}; font-size: 10px; opacity: 0.65; white-space: nowrap;">${escapeHtml(emptyText)}</span>`;
+  }
+  return items
+    .map(item => {
+      const color = safeCssColor(item.color, text);
+      const paneAttr = item.paneId ? ` data-pane="${escapeHtml(item.paneId)}"` : '';
+      return `<div style="display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; border-radius: 999px; border: 1px solid rgba(128,128,128,0.22); background: rgba(128,128,128,0.08); color: ${color}; font-size: 10px; white-space: nowrap;">
+            <span style="pointer-events: none; max-width: 140px; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(item.label)}</span>
+            <button class="fscandle-toolbar-remove" data-kind="${escapeHtml(item.kind)}" data-id="${escapeHtml(item.id)}"${paneAttr}
+              style="display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; padding: 0; border: none; background: transparent; color: ${color}; cursor: pointer; opacity: 0.75;">
+              ${ICON.close}
+            </button>
+          </div>`;
+    })
+    .join('');
 }

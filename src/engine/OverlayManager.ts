@@ -16,6 +16,8 @@ export class OverlayManager {
   private _templates: Map<string, OverlayTemplate> = new Map();
   /** Per-overlay-type restyling, applied over whatever the template drew. */
   private _styleOverrides: Map<string, FigureStyleOverride> = new Map();
+  /** Overlays whose template threw; skipped until they change. */
+  private _brokenIds: Set<string> = new Set();
 
   constructor() {
     this._registerDefaultTemplates();
@@ -38,14 +40,17 @@ export class OverlayManager {
   }
 
   public addOverlay(overlay: Overlay) {
+    this._brokenIds.delete(overlay.id);
     this._overlays.push(overlay);
   }
 
   public removeOverlay(id: string) {
+    this._brokenIds.delete(id);
     this._overlays = this._overlays.filter(o => o.id !== id);
   }
 
   public clear() {
+    this._brokenIds.clear();
     this._overlays = [];
   }
 
@@ -59,6 +64,7 @@ export class OverlayManager {
   }
 
   public setOverlays(overlays: Overlay[]) {
+    this._brokenIds.clear();
     this._overlays = overlays;
     // B2 fix: after undo/redo/import, preload images for image annotation overlays
     for (const o of this._overlays) {
@@ -82,27 +88,33 @@ export class OverlayManager {
     ctx.clip();
 
     this._getRenderOrder().forEach(overlay => {
+      if (this._brokenIds.has(overlay.id)) return;
       ctx.save();
-      const isSelected = selectedOverlay?.id === overlay.id;
-      ctx.strokeStyle = isSelected ? '#FFEB3B' : overlay.color;
-      ctx.lineWidth = isSelected ? overlay.lineWidth + 1.5 : overlay.lineWidth;
-      ctx.fillStyle = isSelected ? '#FFEB3B' : overlay.color;
-      ctx.font = `400 10px ${UI_FONT_FAMILY}`;
+      try {
+        const isSelected = selectedOverlay?.id === overlay.id;
+        ctx.strokeStyle = isSelected ? '#FFEB3B' : overlay.color;
+        ctx.lineWidth = isSelected ? overlay.lineWidth + 1.5 : overlay.lineWidth;
+        ctx.fillStyle = isSelected ? '#FFEB3B' : overlay.color;
+        ctx.font = `400 10px ${UI_FONT_FAMILY}`;
 
-      const template = this._templates.get(overlay.type);
-      if (template) {
-        template.render?.(ctx, overlay, transformer, dataStore, isSelected);
-        if (template.createFigures) {
-          drawFigures(
-            ctx,
-            applyFigureStyleOverride(
-              template.createFigures(this._buildFigureParams(overlay, transformer, dataStore, isSelected, template)),
-              this._styleOverrides.get(overlay.type),
-            ),
-          );
+        const template = this._templates.get(overlay.type);
+        if (template) {
+          template.render?.(ctx, overlay, transformer, dataStore, isSelected);
+          if (template.createFigures) {
+            drawFigures(
+              ctx,
+              applyFigureStyleOverride(
+                template.createFigures(this._buildFigureParams(overlay, transformer, dataStore, isSelected, template)),
+                this._styleOverrides.get(overlay.type),
+              ),
+            );
+          }
         }
+      } catch (error) {
+        this._markBroken(overlay, error);
+      } finally {
+        ctx.restore();
       }
-      ctx.restore();
     });
 
     ctx.restore(); // restore clip
@@ -191,6 +203,8 @@ export class OverlayManager {
     const overlay = this._overlays.find(item => item.id === id);
     if (!overlay) return null;
     Object.assign(overlay, update);
+    // A changed overlay gets another chance to draw.
+    this._brokenIds.delete(id);
     return overlay;
   }
 
@@ -213,7 +227,10 @@ export class OverlayManager {
   /** Apply an update to every overlay in a group. Returns how many changed. */
   public overrideGroup(groupId: string, update: Partial<Omit<Overlay, 'id'>>): number {
     const targets = this._overlays.filter(overlay => overlay.groupId === groupId);
-    targets.forEach(overlay => Object.assign(overlay, update));
+    targets.forEach(overlay => {
+      Object.assign(overlay, update);
+      this._brokenIds.delete(overlay.id);
+    });
     return targets.length;
   }
 
@@ -247,8 +264,24 @@ export class OverlayManager {
    */
   private _getInteractiveOverlays(): Overlay[] {
     return this._getRenderOrder()
-      .filter(overlay => !overlay.locked)
+      .filter(overlay => !overlay.locked && !this._brokenIds.has(overlay.id))
       .reverse();
+  }
+
+  /**
+   * Record an overlay whose template threw, so it is skipped until it changes.
+   * Without this, one malformed overlay threw on every frame and stopped the
+   * rest of the frame from drawing.
+   */
+  private _markBroken(overlay: Overlay, error: unknown) {
+    if (this._brokenIds.has(overlay.id)) return;
+    this._brokenIds.add(overlay.id);
+    console.warn(`[fscandle] Overlay "${overlay.id}" (${overlay.type}) could not be drawn and is skipped until it changes.`, error);
+  }
+
+  /** Ids of overlays that threw while drawing or hit-testing. */
+  public getBrokenOverlayIds(): string[] {
+    return [...this._brokenIds];
   }
 
   /**
@@ -263,8 +296,12 @@ export class OverlayManager {
   public findOverlayAt(x: number, y: number, transformer: CoordinateTransformer, dataStore: CoordinateDataSource): Overlay | null {
     const threshold = 10;
     for (const overlay of this._getInteractiveOverlays()) {
-      const figures = this._buildHitFigures(overlay, transformer, dataStore);
-      if (figures.length > 0 && isPointInAnyFigure(x, y, figures, threshold)) return overlay;
+      try {
+        const figures = this._buildHitFigures(overlay, transformer, dataStore);
+        if (figures.length > 0 && isPointInAnyFigure(x, y, figures, threshold)) return overlay;
+      } catch (error) {
+        this._markBroken(overlay, error);
+      }
     }
     return null;
   }

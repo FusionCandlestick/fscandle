@@ -1,5 +1,6 @@
 import type { KLineData } from '../types';
 import type { ChartGuiHost } from './types';
+import { escapeHtml, safeCssColor } from './html';
 
 /**
  * The per-pane legend: OHLCV for the hovered bar, indicator readouts, and the
@@ -99,16 +100,18 @@ export class LegendWidget {
     const { layout, localization } = this._host.getOptions();
     const fontSize = layout.fontSize;
     const bar = entry.bar;
-    const closeColor = bar.close >= bar.open ? entry.upColor : entry.downColor;
+    const upColor = safeCssColor(entry.upColor, 'inherit');
+    const downColor = safeCssColor(entry.downColor, 'inherit');
+    const closeColor = bar.close >= bar.open ? upColor : downColor;
     const volume = entry.kind === 'main'
       ? `<span>V:${(bar.volume || 0).toLocaleString(localization.locale)}</span>`
       : '';
 
     const content =
-      `<span style="color:${entry.kind === 'stacked' ? closeColor : 'inherit'}; opacity:${entry.kind === 'stacked' ? 0.8 : 0.6}; font-size:${fontSize - 1}px;">${entry.label}</span>
+      `<span style="color:${entry.kind === 'stacked' ? closeColor : 'inherit'}; opacity:${entry.kind === 'stacked' ? 0.8 : 0.6}; font-size:${fontSize - 1}px;">${escapeHtml(entry.label)}</span>
       <span>O:${this._price(bar.open)}</span>
-      <span>H:<span style="color:${entry.upColor}">${this._price(bar.high)}</span></span>
-      <span>L:<span style="color:${entry.downColor}">${this._price(bar.low)}</span></span>
+      <span>H:<span style="color:${upColor}">${this._price(bar.high)}</span></span>
+      <span>L:<span style="color:${downColor}">${this._price(bar.low)}</span></span>
       <span>C:<span style="color:${closeColor}">${this._price(bar.close)}</span></span>
       ${volume}`;
 
@@ -119,12 +122,12 @@ export class LegendWidget {
     const { layout } = this._host.getOptions();
     const color = INDICATOR_COLORS[index % INDICATOR_COLORS.length];
     const values = entry.values
-      .map(value => `<span style="color:${layout.textColor}">${value.key}:</span> <span style="color:${color}">${value.text}</span> `)
+      .map(value => `<span style="color:${safeCssColor(layout.textColor, 'inherit')}">${escapeHtml(value.key)}:</span> <span style="color:${color}">${escapeHtml(value.text)}</span> `)
       .join('');
 
     return `<div style="pointer-events:none; font-size: ${layout.fontSize}px; font-weight: bold; color: ${color}; display: inline-flex; align-items: center; justify-content: space-between; gap: 12px; padding: 3px 8px; border-radius: 6px; background: rgba(128,128,128,0.06); border: 1px solid rgba(128,128,128,0.12); margin-bottom: 4px; max-width: fit-content; transition: background 0.2s;">
       <span style="pointer-events: none; display: inline-flex; align-items: center; gap: 6px;">
-        <span>${entry.name}</span>
+        <span>${escapeHtml(entry.name)}</span>
         <span>${values}</span>
       </span>
       ${this._button('fscandle-legend-del-ind', ICON.close, this._host.t('legend.removeIndicator'), {
@@ -153,23 +156,23 @@ export class LegendWidget {
     data: Record<string, string>,
     opacity = 0.65,
   ): string {
-    const attrs = Object.entries(data).map(([key, value]) => `data-${key}="${value}"`).join(' ');
-    const style = `pointer-events:auto; cursor:pointer; background:transparent; border:none; font-size:10px; color:${this._host.getOptions().layout.textColor}; opacity:${opacity}; padding:2px; display:flex; align-items:center; justify-content:center; transition:opacity 0.2s;`;
+    const attrs = Object.entries(data).map(([key, value]) => `data-${key}="${escapeHtml(value)}"`).join(' ');
+    const style = `pointer-events:auto; cursor:pointer; background:transparent; border:none; font-size:10px; color:${safeCssColor(this._host.getOptions().layout.textColor, 'inherit')}; opacity:${opacity}; padding:2px; display:flex; align-items:center; justify-content:center; transition:opacity 0.2s;`;
     return `<button class="${className}" ${attrs} style="${style}"
       onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='${opacity}'"
-      title="${title}">${svg(icon)}</button>`;
+      title="${escapeHtml(title)}">${svg(icon)}</button>`;
   }
 
   private _row(content: string, controls: string, hidden: boolean): string {
     const { layout } = this._host.getOptions();
     return `<div style="pointer-events:none; display:inline-flex; align-items:center; justify-content:space-between; gap:12px; padding:3px 8px; border-radius:6px; background:rgba(128,128,128,0.06); border:1px solid rgba(128,128,128,0.12); margin-bottom:4px; max-width:fit-content; opacity:${hidden ? '0.45' : '1'}; transition:all 0.2s; white-space:nowrap;">
-      <span style="display:inline-flex; align-items:center; flex-wrap:wrap; gap:6px; min-width:0; pointer-events:none; color:${layout.textColor}; font-size:${layout.fontSize}px; font-weight:bold;">${content}</span>
+      <span style="display:inline-flex; align-items:center; flex-wrap:wrap; gap:6px; min-width:0; pointer-events:none; color:${safeCssColor(layout.textColor, 'inherit')}; font-size:${layout.fontSize}px; font-weight:bold;">${content}</span>
       ${controls}
     </div>`;
   }
 
   private _price(value: number): string {
-    return this._host.formatPrice(value);
+    return escapeHtml(this._host.formatPrice(value));
   }
 
   private _bind(element: HTMLDivElement, paneId: string): void {

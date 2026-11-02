@@ -32,6 +32,8 @@
  */
 const ATOMIC_OPTION_KEYS: ReadonlySet<string> = new Set(['period', 'session']);
 
+const PROTOTYPE_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
+
 const isPlainObject = (value: unknown): value is Record<string, unknown> => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
@@ -51,7 +53,9 @@ export function mergeOptionTree<T>(base: T, overrides: unknown): T {
 
   const merged: Record<string, unknown> = { ...base };
   for (const [key, value] of Object.entries(overrides)) {
-    if (value === undefined) continue;
+    // Overrides can be parsed from persisted state, where a `__proto__` key is
+    // an ordinary own property; assigning it would replace the prototype.
+    if (value === undefined || PROTOTYPE_KEYS.has(key)) continue;
     const current = merged[key];
     merged[key] =
       ATOMIC_OPTION_KEYS.has(key) || !isPlainObject(current) || !isPlainObject(value)

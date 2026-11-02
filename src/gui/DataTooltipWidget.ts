@@ -1,5 +1,6 @@
 import type { KLineData } from '../types';
 import type { ChartGuiHost } from './types';
+import { escapeHtml } from './html';
 
 export interface DataTooltipState {
   /** Crosshair position in chart-content pixel space, or null when off-chart. */
@@ -97,13 +98,13 @@ export class DataTooltipWidget {
     element.style.background = isLight ? 'rgba(255,255,255,0.96)' : 'rgba(15,23,42,0.96)';
     element.style.color = isLight ? '#0b1324' : '#f8fafc';
     element.innerHTML = `
-      <div style="font-weight:700; margin-bottom:6px;">${this._host.formatTime(bar.timestamp)}</div>
+      <div style="font-weight:700; margin-bottom:6px;">${escapeHtml(this._host.formatTime(bar.timestamp))}</div>
       <div style="display:grid; grid-template-columns:repeat(2, auto); gap:3px 12px;">
         ${rows
           .map(
             ([label, value]) => `
-          <span style="opacity:0.68;">${label}</span>
-          <span style="text-align:right; font-variant-numeric:tabular-nums;">${value}</span>
+          <span style="opacity:0.68;">${escapeHtml(label)}</span>
+          <span style="text-align:right; font-variant-numeric:tabular-nums;">${escapeHtml(value)}</span>
         `,
           )
           .join('')}
