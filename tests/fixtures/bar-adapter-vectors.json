@@ -1,0 +1,226 @@
+{
+  "version": "bar-adapter-v1",
+  "prices": [
+    {
+      "id": "null",
+      "value": null,
+      "expected": {
+        "fusionquant": "unknown",
+        "cortex": "reject",
+        "chart": "reject",
+        "platform-frontend": "unknown"
+      }
+    },
+    {
+      "id": "empty",
+      "value": "",
+      "expected": {
+        "fusionquant": "unknown",
+        "cortex": "reject",
+        "chart": "reject",
+        "platform-frontend": "unknown"
+      }
+    },
+    {
+      "id": "blank",
+      "value": "  ",
+      "expected": {
+        "fusionquant": "reject",
+        "cortex": "reject",
+        "chart": "reject",
+        "platform-frontend": "unknown"
+      }
+    },
+    {
+      "id": "nan",
+      "special": "nan",
+      "expected": {
+        "fusionquant": "reject",
+        "cortex": "reject",
+        "chart": "reject",
+        "platform-frontend": "unknown"
+      }
+    },
+    {
+      "id": "infinity",
+      "special": "infinity",
+      "expected": {
+        "fusionquant": "reject",
+        "cortex": "reject",
+        "chart": "reject",
+        "platform-frontend": "unknown"
+      }
+    },
+    {
+      "id": "negative-infinity",
+      "special": "negative-infinity",
+      "expected": {
+        "fusionquant": "reject",
+        "cortex": "reject",
+        "chart": "reject",
+        "platform-frontend": "unknown"
+      }
+    },
+    {
+      "id": "zero",
+      "value": 0,
+      "expected": {
+        "fusionquant": "accept",
+        "cortex": "reject",
+        "chart": "accept",
+        "platform-frontend": "accept"
+      }
+    },
+    {
+      "id": "number",
+      "value": 10,
+      "expected": {
+        "fusionquant": "accept",
+        "cortex": "accept",
+        "chart": "accept",
+        "platform-frontend": "accept"
+      }
+    },
+    {
+      "id": "numeric-string",
+      "value": "10",
+      "expected": {
+        "fusionquant": "accept",
+        "cortex": "reject",
+        "chart": "accept",
+        "platform-frontend": "accept"
+      }
+    }
+  ],
+  "times": [
+    {
+      "id": "utc",
+      "value": "2026-09-15T13:30:00Z",
+      "epochMs": 1789479000000,
+      "expected": {
+        "fusionquant": "instant",
+        "cortex": "instant",
+        "chart": "instant",
+        "platform-frontend": "exchange-wall-clock"
+      },
+      "platformChartMs": 1789464600000
+    },
+    {
+      "id": "offset",
+      "value": "2026-09-15T09:30:00-04:00",
+      "epochMs": 1789479000000,
+      "expected": {
+        "fusionquant": "instant",
+        "cortex": "instant",
+        "chart": "instant",
+        "platform-frontend": "exchange-wall-clock"
+      },
+      "platformChartMs": 1789464600000
+    },
+    {
+      "id": "naive",
+      "value": "2026-09-15T09:30:00",
+      "expected": {
+        "fusionquant": "reject",
+        "cortex": "naive",
+        "chart": "reject",
+        "platform-frontend": "exchange-wall-clock"
+      },
+      "platformChartMs": 1789464600000
+    },
+    {
+      "id": "seconds",
+      "value": 1789479000,
+      "epochMs": 1789479000000,
+      "expected": {
+        "fusionquant": "reject",
+        "cortex": "reject",
+        "chart": "instant",
+        "platform-frontend": "exchange-wall-clock"
+      },
+      "platformChartMs": 1789464600000
+    },
+    {
+      "id": "milliseconds",
+      "value": 1789479000000,
+      "epochMs": 1789479000000,
+      "expected": {
+        "fusionquant": "reject",
+        "cortex": "reject",
+        "chart": "instant",
+        "platform-frontend": "exchange-wall-clock"
+      },
+      "platformChartMs": 1789464600000
+    }
+  ],
+  "notes": {
+    "missingVolume": "unknown, never zero",
+    "duplicates": "normalization is not de-duplication; consumers must validate dataset uniqueness",
+    "adjustment": "unknown must remain unknown; chart display timestamp is not known_at"
+  },
+  "extras": [
+    {
+      "id": "null-volume",
+      "field": "volume",
+      "value": null,
+      "expected": {
+        "fusionquant": "unknown",
+        "cortex": "unknown",
+        "chart": "reject",
+        "platform-frontend": "unknown"
+      }
+    },
+    {
+      "id": "zero-volume",
+      "field": "volume",
+      "value": 0,
+      "expected": {
+        "fusionquant": "preserve",
+        "cortex": "preserve",
+        "chart": "preserve",
+        "platform-frontend": "preserve"
+      }
+    },
+    {
+      "id": "adjustment-unknown",
+      "field": "adjustment",
+      "value": "unknown",
+      "expected": {
+        "fusionquant": "preserve",
+        "cortex": "reject",
+        "chart": "not-carried",
+        "platform-frontend": "not-carried"
+      }
+    },
+    {
+      "id": "adjustment-split-adjusted",
+      "field": "adjustment",
+      "value": "split-adjusted",
+      "expected": {
+        "fusionquant": "preserve",
+        "cortex": "reject",
+        "chart": "not-carried",
+        "platform-frontend": "not-carried"
+      }
+    }
+  ],
+  "duplicates": {
+    "count": 2,
+    "expected": {
+      "fusionquant": 2,
+      "cortex": 2,
+      "chart": 2,
+      "platform-frontend": 2
+    }
+  },
+  "adapters": {
+    "fusionquant": {
+      "prices": "MarketDataIntradayDoc",
+      "times": "canonical_bar; verified timezone required",
+      "extras": "canonical_bar"
+    },
+    "platform-frontend": "parseOptionalNumber / toCandlestickPoint / toChartTimestamp; New York wall clock encoded as UTC",
+    "cortex": "ColumnarBarFeed.from_bars",
+    "chart": "normalizeBars"
+  }
+}
