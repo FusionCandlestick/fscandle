@@ -24,6 +24,7 @@ import { HollowCandlestickSeries } from './engine/HollowCandlestickSeries';
 import { HeikinAshiSeries } from './engine/HeikinAshiSeries';
 import { OverlayManager, Overlay, OverlayPoint, OverlayTemplate } from './engine/OverlayManager';
 import { OverlayPrimitive } from './engine/OverlayPrimitive';
+import { OverlayHistory } from './engine/OverlayHistory';
 import { Axis } from './engine/Axis';
 import { cloneOptionTree, mergeOptionTree } from './model/optionTree';
 import { findUnknownOptionPaths } from './model/optionSchema';
@@ -498,9 +499,7 @@ export class FusionCandlestickChart {
   private _remoteCrosshairPos: { x: number, y: number } | null = null;
 
   // History for Undo/Redo
-  private _history: string[] = [];
-  private _redoStack: string[] = [];
-  private _maxHistory: number = 50;
+  private _overlayHistory = new OverlayHistory(50);
 
   // Resize detection
   private _resizeObserver: ResizeObserver | null = null;
@@ -2996,8 +2995,7 @@ export class FusionCandlestickChart {
     this._activeDrawingLayerId = layer.id;
     this._overlayManager.setOverlays([]);
     this._setSelectedOverlay(null);
-    this._history = [];
-    this._redoStack = [];
+    this._overlayHistory.clear();
     this.saveState();
     this.update(InvalidationLevel.Overlay);
     return { ...layer, overlays: [] };
@@ -3012,8 +3010,7 @@ export class FusionCandlestickChart {
     this._activeDrawingLayerId = layerId;
     this._overlayManager.setOverlays(targetLayer.overlays.map(overlay => ({ ...overlay })));
     this._setSelectedOverlay(null);
-    this._history = [];
-    this._redoStack = [];
+    this._overlayHistory.clear();
     this.saveState();
     this.update(InvalidationLevel.Overlay);
   }
@@ -3045,8 +3042,7 @@ export class FusionCandlestickChart {
       this._activeDrawingLayerId = nextLayer.id;
       this._overlayManager.setOverlays(nextLayer.overlays.map(overlay => ({ ...overlay })));
       this._setSelectedOverlay(null);
-      this._history = [];
-      this._redoStack = [];
+      this._overlayHistory.clear();
       this.update(InvalidationLevel.Overlay);
     }
     this.saveState();
@@ -3170,31 +3166,23 @@ export class FusionCandlestickChart {
   }
 
   public undo() {
-    if (this._history.length === 0) return;
-    this._redoStack.push(JSON.stringify(this._overlayManager.getOverlays()));
-    const prevState = this._history.pop();
-    if (prevState) {
-      this._overlayManager.setOverlays(JSON.parse(prevState));
-      this.saveState();
-      this.update();
-    }
+    const previous = this._overlayHistory.undo(this._overlayManager.getOverlays());
+    if (!previous) return;
+    this._overlayManager.setOverlays(previous);
+    this.saveState();
+    this.update();
   }
 
   public redo() {
-    if (this._redoStack.length === 0) return;
-    this._history.push(JSON.stringify(this._overlayManager.getOverlays()));
-    const nextState = this._redoStack.pop();
-    if (nextState) {
-      this._overlayManager.setOverlays(JSON.parse(nextState));
-      this.saveState();
-      this.update();
-    }
+    const next = this._overlayHistory.redo(this._overlayManager.getOverlays());
+    if (!next) return;
+    this._overlayManager.setOverlays(next);
+    this.saveState();
+    this.update();
   }
 
   private _saveHistory() {
-    this._history.push(JSON.stringify(this._overlayManager.getOverlays()));
-    if (this._history.length > this._maxHistory) this._history.shift();
-    this._redoStack = []; // Clear redo stack on new action
+    this._overlayHistory.record(this._overlayManager.getOverlays());
   }
 
   private _commitActiveDrawingLayer() {
