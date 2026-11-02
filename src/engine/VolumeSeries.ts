@@ -24,14 +24,17 @@ export class VolumeSeries extends BaseSeries<VolumeSeriesOptions> {
     // the spread form would throw on a dataset large enough to need it.
     let maxVolume = 0;
     for (const item of data) {
-      const volume = item.volume || 0;
-      if (volume > maxVolume) maxVolume = volume;
+      const volume = item.volume;
+      if (typeof volume === 'number' && Number.isFinite(volume) && volume > maxVolume) maxVolume = volume;
     }
+    if (maxVolume === 0) return;
     const volumeHeight = height * 0.2; // Reserve 20% for volume
 
     data.forEach((d, i) => {
+      const volume = d.volume;
+      if (typeof volume !== 'number' || !Number.isFinite(volume) || volume < 0) return;
       const x = transformer.indexToX(i) - barWidth / 2;
-      const vHeight = ((d.volume || 0) / maxVolume) * volumeHeight;
+      const vHeight = (volume / maxVolume) * volumeHeight;
       const y = height - vHeight;
 
       const isUp = d.close >= d.open;
