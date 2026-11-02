@@ -2341,6 +2341,7 @@ export class FusionCandlestickChart {
 
   public removeIndicator(paneId: string, indicatorId: string) {
     this._indicatorManager.removeIndicator(paneId, indicatorId);
+    this._events.emit('indicatorRemoved', { paneId, indicatorId });
     if (paneId !== 'main' && this._indicatorManager.getIndicators(paneId).length === 0) {
       // Removing the pane re-lays out the stack, which every pane has to follow.
       this._removePane(paneId);

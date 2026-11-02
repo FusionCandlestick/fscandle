@@ -66,6 +66,7 @@ export interface ChartEventMap {
   sizeChange: ChartSizeParams;
   overlayChange: OverlayChangeParams;
   dataChange: DataChangeParams;
+  indicatorRemoved: { paneId: string; indicatorId: string };
 }
 
 export type ChartEventName = keyof ChartEventMap;
