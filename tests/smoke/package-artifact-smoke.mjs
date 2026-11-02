@@ -38,6 +38,16 @@ const datafeed = await import(resolve(root, 'dist/datafeed.js'));
   assert.equal(typeof datafeed[name], 'function', `datafeed entry must export ${name}`),
 );
 
+// Generated demo events live only in the opt-in mock entry, never in a
+// production import.
+const mock = await import(resolve(root, 'dist/mock.js'));
+['buildMockSymbolContextEvents', 'createMockSymbolContextFeed'].forEach(name => {
+  assert.equal(typeof mock[name], 'function', `mock entry must export ${name}`);
+  assert.equal(datafeed[name], undefined, `datafeed entry must not export ${name}`);
+  assert.equal(esm[name], undefined, `main entry must not export ${name}`);
+});
+assert.equal(typeof datafeed.mergeSymbolContextEventMarkers, 'function', 'the generic event helper stays in datafeed');
+
 // react/react-dom stay peer dependencies, so they must not be inlined into the bundle.
 assert.equal(manifest.dependencies?.react, undefined);
 assert.ok(manifest.peerDependencies?.react, 'react must be declared as a peer dependency');

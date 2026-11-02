@@ -61,6 +61,11 @@
       "types": "./dist/datafeed.d.ts",
       "import": "./dist/datafeed.js",
       "require": "./dist/datafeed.cjs"
+    },
+    "./mock": {
+      "types": "./dist/mock.d.ts",
+      "import": "./dist/mock.js",
+      "require": "./dist/mock.cjs"
     }
   },
   "scripts": {

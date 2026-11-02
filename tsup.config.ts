@@ -9,7 +9,7 @@ import { defineConfig } from 'tsup';
 const CLIENT_ENTRIES = ['react.js', 'react.cjs'];
 
 export default defineConfig({
-  entry: ['src/index.ts', 'src/react.ts', 'src/datafeed.ts'],
+  entry: ['src/index.ts', 'src/react.ts', 'src/datafeed.ts', 'src/mock.ts'],
   format: ['esm', 'cjs'],
   dts: true,
   clean: true,

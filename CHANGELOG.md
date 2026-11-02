@@ -6,7 +6,26 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+
+- Imported drawings could run script in the page. The toolbar, legend and data
+  tooltip interpolated overlay ids, labels and colours into HTML unescaped, so
+  an overlay id containing a quote could add an event handler to the toolbar.
+  All three now escape text and attributes and accept only plain CSS colours.
+- Imported drawings and saved state are validated before use. Image
+  annotations are kept only when their picture is a `data:image/` URL, and
+  prototype keys in saved options are ignored.
+
 ### Changed
+
+- **Breaking:** `createMockSymbolContextFeed` and `buildMockSymbolContextEvents`
+  generate invented news and are no longer exported from `fscandle` or
+  `fscandle/datafeed`. Import them from the new `fscandle/mock` entry.
+  `mergeSymbolContextEventMarkers` stays in `fscandle/datafeed`.
+- `importOverlaysJSON` skips overlays that cannot be drawn (with a console
+  warning), and throws without changing the chart when the input is not a
+  drawing export or none of its overlays is usable.
+- The polling data feed runs one request at a time.
 
 - `FusionCandlestickChartComponent` keeps one chart instance per mount. Prop
   changes update it in place instead of destroying and rebuilding it, so
@@ -25,6 +44,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- One malformed overlay (for example, one without points) threw on every frame,
+  and because state is saved back, on every later load as well. Such overlays
+  are now dropped on load and import, and an overlay whose template throws is
+  skipped until it changes instead of stopping the frame.
+- Undo and redo dropped overlay callbacks, so after one undo, overlays lost
+  `onClick`, `onPressedMoving` and the rest, and React trading lines stopped
+  reporting drags.
+- Overlays created in the same millisecond could share an id, and removing one
+  removed both. Ids for overlays, drawing layers, stacked panes and indicators
+  are now unique.
+- The polling feed delivered bars from a request that finished after the caller
+  unsubscribed, and then reported `streaming` after `closed`. `destroy()` now
+  stops in-flight requests too. The WebSocket feed ignores messages that arrive
+  after unsubscribe.
 - Overlays passed in `overlays` were duplicated each time the chart was rebuilt;
   they are now reconciled by `id`.
 
@@ -35,6 +68,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `onTradingLineDrag` unless `draggable: false`, which locks it.
 - Trading lines are restored after the chart is rebuilt, and removing a line
   from `tradingLines` now removes it from the chart.
+
+### Added
+
+- Browser tests for the public chart API and the React component
+  (`npm run test:browser`), with a regression test for each fix above.
+- API documentation for price lines, markers, undo/redo, drawing import and
+  export, `setTheme`, data feeds, and the visible-range semantics.
 
 ## [0.1.0] - 2026-09-04
 

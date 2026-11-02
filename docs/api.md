@@ -10,6 +10,7 @@ import { createChart, FusionCandlestickChart } from 'fscandle';
 const chart = createChart(container, options);
 chart.setData(klineData);
 chart.updateData(nextBar);
+chart.setTheme('light');   // or 'dark': background, text, grid and crosshair colours
 chart.destroy();
 ```
 
@@ -20,6 +21,7 @@ The package also exposes focused entry points:
 ```ts
 import { FusionCandlestickChartComponent } from 'fscandle/react';
 import { bindMarketDataFeed, createPollingDataFeed } from 'fscandle/datafeed';
+import { createMockSymbolContextFeed } from 'fscandle/mock'; // demo data only
 ```
 
 ## Time Scale
@@ -40,6 +42,8 @@ timeScale.scrollToLatest();
 
 `subscribeVisibleLogicalRangeChange` invokes the callback immediately with the current range and again when scroll, zoom, data-follow, or explicit range changes move the visible logical window.
 
+`setVisibleLogicalRange` puts `from` at the left edge and `to` where the right margin begins, so the newest bar keeps its space for the last-price label. `getVisibleLogicalRange` reports the whole plot, margin included, so its `to` is a little larger than the one you set. Do not feed one chart's `getVisibleLogicalRange()` into another's `setVisibleLogicalRange()` repeatedly: each round trip widens the range by the margin. To keep charts in step, use `ChartSyncGroup`, which copies the viewport directly.
+
 ## Price Scale
 
 ```ts
@@ -53,6 +57,34 @@ priceScale.coordinateToPrice(180);
 ```
 
 Supported modes are `normal` and `log`.
+
+## Price Lines And Markers
+
+Price lines are horizontal levels owned by the caller (entries, stops, liquidation prices). They are drawn with the series, labelled on the price axis, and are not selectable, draggable, or saved with drawings.
+
+```ts
+const tp = chart.createPriceLine({ price: 106, title: 'TP', color: '#22c55e' });
+chart.createPriceLine({ id: 'sl', price: 96, title: 'SL', lineStyle: 'dashed' });
+chart.updatePriceLine(tp.id, { price: 107 });
+chart.removePriceLine('sl');
+chart.priceLines();      // current lines, with defaults filled in
+chart.clearPriceLines();
+```
+
+`lineStyle` is `'solid'`, `'dashed'` or `'dotted'`; `axisLabelVisible: false` hides the axis label. The label shows `title`, or the formatted price when there is no title.
+
+Markers are per-bar glyphs, addressed by the bar's **`timestamp`** (not an index, so prepending history does not move them):
+
+```ts
+chart.setMarkers([
+  { timestamp: bar.timestamp, position: 'aboveBar', shape: 'arrowDown', color: '#f59e0b', text: 'S' },
+  { timestamp: other.timestamp, position: 'belowBar', shape: 'arrowUp', text: 'B' },
+]);
+chart.markers();
+chart.clearMarkers();
+```
+
+`setMarkers` replaces the whole set. A marker whose `timestamp` matches no bar is kept but not drawn, so check the field name: `time` is not read. `position` is `'aboveBar'`, `'belowBar'`, `'inBar'` or `'onPoint'`; `shape` is `'circle'`, `'square'`, `'arrowUp'` or `'arrowDown'`.
 
 ## Series
 
@@ -307,6 +339,21 @@ chart.createOverlay({
 
 Drawing storage is intentionally consolidated. Line presets such as segment, trend, ray, infinite, horizontal, vertical, and price line all create `type: 'line'` overlays with different `line` options. Channel presets create `type: 'channel'` overlays. Text, arrow, tag, and image notes create `type: 'annotation'` overlays. Elliott three-wave/five-wave, ABCD, and ABCDE pattern tools create `type: 'wave'` overlays with `wave.kind`. ABCD and ABCDE also render filled three-point regions for each adjacent A-B-C, B-C-D, and C-D-E triangle. Two-point tools complete on the second click; channel tools complete on the third click; pattern tools complete when their final labeled point is confirmed.
 
+### Undo, import and export
+
+`chart.undo()` and `chart.redo()` step through overlay edits (up to 50). Overlay callbacks survive both; when an overlay still exists, its current callbacks are kept.
+
+Overlay ids the chart generates are unique within a page, including for overlays created in the same millisecond. Give your own overlays an `id` when you need to address them later.
+
+```ts
+chart.exportOverlaysJSON();      // downloads { version, overlays, drawingLayers, activeDrawingLayerId }
+chart.importOverlaysJSON(json);  // accepts that file, or a bare array of overlays
+```
+
+Treat imported drawings and saved state as untrusted input. Each overlay is validated: it needs a string `id` and `type` and at least one point with a finite `timestamp` and `value`. Overlays that fail are skipped with a console warning; if the input is not a drawing export, or lists overlays and none is usable, `importOverlaysJSON` throws and the chart is left unchanged. Image annotations are kept only when their picture is a `data:image/` URL, so a file cannot make the chart fetch an arbitrary address. Ids, labels and colours are escaped wherever the toolbar, legend or tooltip show them.
+
+Functions are never saved: callbacks are not part of an export or of saved state. Attach them again after loading, for example with `updateOverlay(id, { onClick })`.
+
 Drawing layers group overlays into switchable saved sets. `clearActiveDrawingLayer()` acts as the eraser for the current layer only; it does not remove drawings saved in other layers. Use `createDrawingLayer(name)`, `setActiveDrawingLayer(id)`, `deleteDrawingLayer(id)`, `getDrawingLayers()`, and `getActiveDrawingLayerId()` to build external layer panels. Exported drawing JSON now includes `drawingLayers` and `activeDrawingLayerId` while still carrying the active `overlays` array for older integrations.
 
 ## Custom Series
@@ -479,7 +526,30 @@ Two-finger gestures are handled natively: pinch to zoom the time axis, pinch ver
 
 ## Data Feeds
 
-The data feed layer in `src/datafeed` provides typed market-data integration primitives for polling, WebSocket style updates, mock feeds, and fan-out into chart series.
+`fscandle/datafeed` connects a market-data source to a chart:
+
+```ts
+import { bindMarketDataFeed, createPollingDataFeed } from 'fscandle/datafeed';
+
+const feed = createPollingDataFeed({
+  endpoint: request => `/api/klines?symbol=${encodeURIComponent(request.symbol)}&interval=${request.interval}`,
+  pollIntervalMs: 10_000,
+});
+const stop = await bindMarketDataFeed({ chart, feed, symbol: 'BTCUSDT', interval: '1m' });
+// later
+stop();
+feed.destroy?.();
+```
+
+`bindMarketDataFeed` loads history with `setData`, then applies each live bar with `updateData`. The function it resolves to unsubscribes.
+
+- **Polling** (`createPollingDataFeed`) runs one request at a time: a poll is skipped while the previous one is still in flight. Bars older than the newest one delivered are ignored. After the subscription is disposed, or the feed destroyed, a response that was still in flight is dropped rather than delivered.
+- **WebSocket** (`createWebSocketDataFeed`) parses each message with your `parseMessage`. It has no history (`getHistory` resolves to `[]`) and does not reconnect; a dropped connection reports `closed`, and reconnecting is the caller's choice. Messages that arrive after you unsubscribe are ignored.
+- Building endpoint URLs is the caller's job, including escaping the symbol.
+
+`mergeSymbolContextEventMarkers(candles, events)` puts events from any symbol-context feed onto their bars as the per-bar `marker` the candlestick series draws.
+
+Generated demo events (`createMockSymbolContextFeed`, `buildMockSymbolContextEvents`) are not real news. They live in the opt-in `fscandle/mock` entry and are not exported from `fscandle` or `fscandle/datafeed`.
 
 ## Release Verification
 
