@@ -79,7 +79,7 @@ export interface PollingDataFeedOptions {
 }
 
 export function createPollingDataFeed(options: PollingDataFeedOptions): MarketDataFeed {
-  const timers = new Set<number>();
+  const disposers = new Set<() => void>();
   const endpointFor = (request: MarketDataRequest) =>
     typeof options.endpoint === 'function' ? options.endpoint(request) : options.endpoint;
 
@@ -102,10 +102,18 @@ export function createPollingDataFeed(options: PollingDataFeedOptions): MarketDa
     subscribe(subscription: MarketDataSubscription) {
       let lastTimestamp = 0;
       let isDisposed = false;
+      let inFlight = false;
       const run = async () => {
+        // One request at a time: a slow response must not be overtaken by the
+        // next poll, and polls must not pile up behind it.
+        if (isDisposed || inFlight) return;
+        inFlight = true;
         try {
           subscription.onStatusChange?.('loading');
           const data = await load(subscription);
+          // The caller may have unsubscribed while the request was in flight.
+          // Delivering then would push bars into a chart that let go of this feed.
+          if (isDisposed) return;
           data.forEach(bar => {
             if (bar.timestamp >= lastTimestamp) {
               subscription.onUpdate(bar);
@@ -114,28 +122,30 @@ export function createPollingDataFeed(options: PollingDataFeedOptions): MarketDa
           });
           subscription.onStatusChange?.('streaming');
         } catch (error) {
+          if (isDisposed) return;
           subscription.onStatusChange?.('error');
           subscription.onError?.(error instanceof Error ? error : new Error(String(error)));
+        } finally {
+          inFlight = false;
         }
       };
 
       void run();
-      const timer = window.setInterval(() => {
-        if (!isDisposed) void run();
-      }, options.pollIntervalMs ?? 10_000);
-      timers.add(timer);
+      const timer = window.setInterval(() => void run(), options.pollIntervalMs ?? 10_000);
 
-      return () => {
+      const dispose = () => {
+        if (isDisposed) return;
         isDisposed = true;
         window.clearInterval(timer);
-        timers.delete(timer);
+        disposers.delete(dispose);
         subscription.onStatusChange?.('closed');
       };
+      disposers.add(dispose);
+      return dispose;
     },
 
     destroy() {
-      timers.forEach(timer => window.clearInterval(timer));
-      timers.clear();
+      [...disposers].forEach(dispose => dispose());
     },
   };
 }
@@ -165,7 +175,11 @@ export function createWebSocketDataFeed(options: WebSocketDataFeedOptions): Mark
         if (message !== undefined) socket.send(JSON.stringify(message));
       });
 
+      let isDisposed = false;
+
       socket.addEventListener('message', event => {
+        // Messages can still arrive between close() and the socket closing.
+        if (isDisposed) return;
         try {
           const payload = JSON.parse(event.data);
           const parsed = options.parseMessage(payload);
@@ -185,14 +199,18 @@ export function createWebSocketDataFeed(options: WebSocketDataFeedOptions): Mark
 
       socket.addEventListener('close', () => {
         sockets.delete(socket);
-        subscription.onStatusChange?.('closed');
+        // A close the caller asked for has already been reported.
+        if (!isDisposed) subscription.onStatusChange?.('closed');
       });
       socket.addEventListener('error', () => {
+        if (isDisposed) return;
         subscription.onStatusChange?.('error');
         subscription.onError?.(new Error('Market data websocket error'));
       });
 
       return () => {
+        if (isDisposed) return;
+        isDisposed = true;
         socket.close();
         sockets.delete(socket);
         subscription.onStatusChange?.('closed');
