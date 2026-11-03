@@ -6,6 +6,7 @@ import { normalizeDrawingLayers, PERSISTED_STATE_VERSION, parsePersistedState } 
 import { PriceScaleModel } from './model/PriceScaleModel';
 import { StackedPriceScales } from './engine/StackedPriceScales';
 import { PaneTransformers } from './engine/PaneTransformers';
+import { findMagnetSnap } from './engine/magnetSnap';
 import { AxisLayoutModel } from './model/AxisLayoutModel';
 import { CreateIndicatorOptions, IndicatorManager } from './plugins/IndicatorManager';
 import { 
@@ -265,7 +266,6 @@ function mergeChartOptions(base: ChartOptions, overrides: DeepPartial<ChartOptio
 /**
  * How close, in pixels, a pointer must be to an OHLC value for magnet mode to snap to it.
  */
-const MAGNET_SNAP_PX = 12;
 
 /**
  * Rendering invalidation levels to optimize performance.
@@ -1255,41 +1255,12 @@ export class FusionCandlestickChart {
 
     // Magnet: snap to the nearest OHLC value, but only when one is close enough
     // to the pointer to be what the user meant. Otherwise the point stays where
-    // it was placed. The search used to start from an infinite distance, so the
-    // nearest value always won however far it was: a click in empty space was
-    // pulled to a bar many units away.
-    const barSpacing = Math.max(transformer.getBarSpacing(), 1);
-    const neighborRadius = Math.max(1, Math.ceil(MAGNET_SNAP_PX / barSpacing));
-    let bestMatch: { index: number; time: number; price: number; distanceSq: number } | null = null;
-
-    for (let candidateIndex = Math.max(0, index - neighborRadius); candidateIndex <= Math.min(data.length - 1, index + neighborRadius); candidateIndex++) {
-      const candidateData = this._getPrimarySnapData(candidateIndex) || data[candidateIndex];
-      if (!candidateData) continue;
-
-      const candidateX = transformer.indexToX(candidateIndex);
-      const ohlcValues = [candidateData.open, candidateData.high, candidateData.low, candidateData.close];
-
-      for (const candidatePrice of ohlcValues) {
-        const candidateY = transformer.priceToY(candidatePrice);
-        const dx = candidateX - clampedX;
-        const dy = candidateY - chartY;
-        const distanceSq = dx * dx + dy * dy;
-        if (!bestMatch || distanceSq < bestMatch.distanceSq) {
-          bestMatch = {
-            index: candidateIndex,
-            time: candidateData.timestamp,
-            price: candidatePrice,
-            distanceSq,
-          };
-        }
-      }
-    }
-
-    if (!bestMatch || bestMatch.distanceSq > MAGNET_SNAP_PX * MAGNET_SNAP_PX) {
+    // it was placed.
+    const snap = findMagnetSnap(transformer, { x: clampedX, y: chartY }, index, i => this._getPrimarySnapData(i) || data[i], data.length);
+    if (!snap) {
       return { index, time: coordinateTimestamp ?? snapData.timestamp, price };
     }
-    const snapped: { index: number; time: number; price: number; distanceSq: number } = bestMatch;
-    return { index: snapped.index, time: snapped.time, price: snapped.price };
+    return snap;
   }
 
   private _getSeriesStyle(series: BaseSeries | null): ConfigurablePriceSeriesStyle | null {
