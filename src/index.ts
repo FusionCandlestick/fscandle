@@ -19,6 +19,7 @@ export type { FusionCandlestickChartProps, StackedPricePaneInput } from './compo
 export { ChartSyncGroup } from './engine/ChartSyncGroup';
 export { CoordinateTransformer } from './engine/CoordinateTransformer';
 export type { PriceScaleMode } from './engine/CoordinateTransformer';
+export type { CustomPaneDrawParams, CustomPaneOptions, CustomPaneVisibleRange } from './engine/customPane';
 export { SeriesRegistry } from './engine/SeriesRegistry';
 export type { BuiltInSeriesType, SeriesType } from './engine/SeriesRegistry';
 export { BaseSeries } from './engine/BaseSeries';

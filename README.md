@@ -126,7 +126,7 @@ site in [fscandle-web](https://github.com/FusionCandlestick/fscandle-web).
 ## Known gaps
 
 - `src/FusionCandlestickChart.ts` still owns pane orchestration; other concerns have moved to their owners, the remaining access sites have not
-- Custom *pane* views are not pluggable (custom series and primitives are)
+- Custom panes are drawn by a callback and are not saved with the chart state (see `addCustomPane` in the API reference)
 - Indicator catalog is narrower than KLineCharts — deferred in favour of the registry
 
 ## License

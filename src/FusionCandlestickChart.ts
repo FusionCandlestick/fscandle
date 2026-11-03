@@ -7,6 +7,8 @@ import { PriceScaleModel } from './model/PriceScaleModel';
 import { StackedPriceScales } from './engine/StackedPriceScales';
 import { PaneTransformers } from './engine/PaneTransformers';
 import { findMagnetSnap } from './engine/magnetSnap';
+import { isUsableRange, visibleOhlcRange } from './engine/customPane';
+import type { CustomPaneDrawParams, CustomPaneOptions, CustomPaneVisibleRange } from './engine/customPane';
 import { AxisLayoutModel } from './model/AxisLayoutModel';
 import { CreateIndicatorOptions, IndicatorManager } from './plugins/IndicatorManager';
 import { 
@@ -326,6 +328,10 @@ export class FusionCandlestickChart {
    * step. One registry of one entity replaces them.
    */
   private _stackedScales = new StackedPriceScales();
+  /** Panes added with addCustomPane, keyed by pane id. Runtime only: callbacks are not saved. */
+  private _customPanes = new Map<string, CustomPaneOptions>();
+  /** Custom panes whose callback threw; they are not drawn again until re-added. */
+  private _failedCustomPanes = new Set<string>();
   private _hiddenSeriesIds: Set<string> = new Set();
   private _mainSeries: BaseSeries | null = null;
   // Assigned via _recreateAxes() in the constructor.
@@ -1474,6 +1480,74 @@ export class FusionCandlestickChart {
     this._reindexStackedPriceAxes();
     this._refreshYAxisWidths();
     this._layout();
+  }
+
+  /**
+   * Add a pane whose body is drawn by `draw`. It sits in the stack like an
+   * indicator pane: the chart lays it out, draws its axis and crosshair, and
+   * redraws it with the rest. Primitives can target it by id.
+   *
+   * Returns the pane id. Custom panes are not saved with the chart state, since
+   * their callbacks cannot be serialised.
+   */
+  public addCustomPane(options: CustomPaneOptions): string {
+    const id = options.id ?? createId('custom');
+    if (id === 'main') throw new Error('"main" is the price pane and cannot be used for a custom pane');
+    if (this._panes.some(pane => pane.getId() === id)) {
+      throw new Error(`A pane with id "${id}" already exists`);
+    }
+    this._customPanes.set(id, options);
+    this._failedCustomPanes.delete(id);
+    this.addPane(id);
+    this.update();
+    return id;
+  }
+
+  /** Remove a pane added with addCustomPane. Returns false if no such custom pane exists. */
+  public removeCustomPane(id: string): boolean {
+    if (!this._customPanes.has(id)) return false;
+    this._customPanes.delete(id);
+    this._failedCustomPanes.delete(id);
+    this._removePane(id);
+    this.saveState();
+    this.update();
+    return true;
+  }
+
+  /**
+   * The y-range of a custom pane for the bars on screen. A callback that throws
+   * is reported once and the pane falls back to the visible high and low.
+   */
+  private _customPaneRange(paneId: string, visibleRange: CustomPaneVisibleRange, data: KLineData[]): { min: number; max: number } {
+    const custom = this._customPanes.get(paneId);
+    if (custom?.range && !this._failedCustomPanes.has(paneId)) {
+      try {
+        const requested = custom.range(visibleRange, data);
+        if (isUsableRange(requested)) return requested;
+      } catch (error) {
+        this._reportCustomPaneFailure(paneId, 'range', error);
+      }
+    }
+    return visibleOhlcRange(data, visibleRange) ?? { min: 0, max: 1 };
+  }
+
+  /** Run a custom pane's draw callback. A throw is reported once and the pane is skipped until re-added. */
+  private _drawCustomPane(paneId: string, ctx: CanvasRenderingContext2D, params: Omit<CustomPaneDrawParams, 'paneId'>) {
+    const custom = this._customPanes.get(paneId);
+    if (!custom || this._failedCustomPanes.has(paneId)) return;
+    ctx.save();
+    try {
+      custom.draw(ctx, { paneId, ...params });
+    } catch (error) {
+      this._reportCustomPaneFailure(paneId, 'draw', error);
+    } finally {
+      ctx.restore();
+    }
+  }
+
+  private _reportCustomPaneFailure(paneId: string, stage: 'range' | 'draw', error: unknown) {
+    this._failedCustomPanes.add(paneId);
+    console.warn(`fscandle: the ${stage} callback of custom pane "${paneId}" threw. The pane is skipped until it is re-added.`, error);
   }
 
   public setStackedPaneData(paneId: string, data: KLineData[]) {
@@ -4170,10 +4244,12 @@ export class FusionCandlestickChart {
     const { leftIdx, rightIdx } = this._visibleIndexRange(transformer, realWidth, data.length);
     // Falls back when nothing finite is on screen yet: an indicator still warming
     // up, a pane whose indicator was just removed, or a viewport past the data.
-    const { min, max } = indicatorPaneRange(
-      this._indicatorManager.getIndicators(paneId).map(indicator => indicator.extent(leftIdx, rightIdx)),
-      this._options.indicators.fallbackRange,
-    );
+    const { min, max } = this._customPanes.has(paneId)
+      ? this._customPaneRange(paneId, { from: leftIdx, to: rightIdx }, data)
+      : indicatorPaneRange(
+        this._indicatorManager.getIndicators(paneId).map(indicator => indicator.extent(leftIdx, rightIdx)),
+        this._options.indicators.fallbackRange,
+      );
     const paddedRange = getPaddedPriceRange(min, max);
     transformer.setRange(paddedRange.min, paddedRange.max);
 
@@ -4206,6 +4282,13 @@ export class FusionCandlestickChart {
         transformer: transformer,
         bounding: { ...bounding, width: realWidth },
         dataList: data,
+      });
+      this._drawCustomPane(paneId, ctx, {
+        width: realWidth,
+        height: realHeight,
+        transformer,
+        data,
+        visibleRange: { from: leftIdx, to: rightIdx },
       });
       this._drawPrimitivePaneViews(ctx, paneId, 'main', 'chart', bounding, { ...bounding, width: realWidth }, transformer);
     }

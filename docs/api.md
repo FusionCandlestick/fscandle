@@ -186,6 +186,28 @@ panes.setWeights([3, 1]);
 panes.getBounding('main');
 ```
 
+A custom pane is a pane whose body you draw. It sits in the stack like an indicator pane: the chart lays it out, draws its axis and crosshair, and redraws it with the rest. Primitives can target it by id.
+
+```ts
+const id = chart.addCustomPane({
+  range: (visible, data) => null,          // null: use the visible high and low
+  draw(ctx, { width, height, transformer, data, visibleRange }) {
+    // ctx is saved and restored around this call. transformer is this pane's:
+    // transformer.priceToY(price) and transformer.indexToX(index) give pixels.
+    ctx.strokeStyle = '#f5a623';
+    ctx.beginPath();
+    const bars = data.slice(Math.max(0, visibleRange.from), visibleRange.to + 1);
+    if (bars.length === 0) return;
+    ctx.moveTo(0, transformer.priceToY(bars[0].close));
+    ctx.lineTo(width, transformer.priceToY(bars[bars.length - 1].close));
+    ctx.stroke();
+  },
+});
+chart.removeCustomPane(id);             // false if no such custom pane exists
+```
+
+Pass `id` to choose the pane id; `main` is reserved and a duplicate id throws. A `range` that returns a finite range with `max > min` is used as given. If `draw` or `range` throws, the chart reports one console warning and skips that pane until it is re-added, and the rest of the chart keeps drawing. Custom panes are not saved with the chart state, because their callbacks cannot be serialised; a loaded state simply has no such pane. Call `chart.update(InvalidationLevel.Full, id)` to redraw one custom pane.
+
 Stacked price panes remain available through `addStackedPricePane`, `setStackedPaneData`, `setStackedPricePaneStyle`, and `removeStackedPricePane`. The main price scale plus five stacked price series gives one-chart comparison for up to six symbols; stacked scales are capped at three columns per side.
 
 How the stack divides its space, and what the strip between two panes looks like, is configured under `panes`:
