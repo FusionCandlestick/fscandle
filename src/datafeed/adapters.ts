@@ -159,6 +159,19 @@ export interface WebSocketReconnectOptions {
   maxAttempts?: number;
 }
 
+export interface WebSocketHeartbeatOptions {
+  /** How often to send `message` while the socket is open. */
+  intervalMs: number;
+  /** What to send. Strings are sent as they are; anything else as JSON. */
+  message: unknown | (() => unknown);
+  /**
+   * Whether an incoming message is the server's reply to a heartbeat. A reply
+   * counts as activity for `idleTimeoutMs` and is not passed to `parseMessage`.
+   * Receives the raw `event.data`.
+   */
+  isReply?: (data: unknown) => boolean;
+}
+
 export interface WebSocketDataFeedOptions {
   url: string | ((request: MarketDataRequest) => string);
   subscribeMessage?: (request: MarketDataRequest) => unknown;
@@ -168,6 +181,14 @@ export interface WebSocketDataFeedOptions {
    * reads `reconnecting` while waiting. Pass `false` to report `closed` instead.
    */
   reconnect?: false | WebSocketReconnectOptions;
+  /**
+   * Treat an open socket that has received nothing for this long as dead: report
+   * an error, close it, and reconnect as after an unexpected close. Off when
+   * omitted, since a quiet market can legitimately send nothing for a while.
+   */
+  idleTimeoutMs?: number;
+  /** Send a keep-alive message on an interval while the socket is open. */
+  heartbeat?: WebSocketHeartbeatOptions;
 }
 
 export function createWebSocketDataFeed(options: WebSocketDataFeedOptions): MarketDataFeed {
@@ -187,10 +208,38 @@ export function createWebSocketDataFeed(options: WebSocketDataFeedOptions): Mark
       let retryTimer: ReturnType<typeof setTimeout> | null = null;
       let attempts = 0;
       let stopped = false;
+      let idleTimer: ReturnType<typeof setTimeout> | null = null;
+      let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+
+      /** Stop the idle watchdog and the heartbeat of the current socket. */
+      const clearLiveness = () => {
+        if (idleTimer !== null) clearTimeout(idleTimer);
+        idleTimer = null;
+        if (heartbeatTimer !== null) clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+      };
+
+      /** (Re)start the idle watchdog for `ws`: any message pushes it back. */
+      const armIdle = (ws: WebSocket) => {
+        const timeout = options.idleTimeoutMs;
+        if (!timeout || timeout <= 0) return;
+        if (idleTimer !== null) clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => {
+          idleTimer = null;
+          if (stopped || socket !== ws) return;
+          subscription.onError?.(new Error(`Market data websocket received nothing for ${timeout} ms; reconnecting`));
+          clearLiveness();
+          // Clear the reference first, so this socket's close event is ignored.
+          socket = null;
+          ws.close();
+          scheduleRetry();
+        }, timeout);
+      };
 
       const stop = () => {
         stopped = true;
         halts.delete(halt);
+        clearLiveness();
         if (retryTimer !== null) clearTimeout(retryTimer);
         retryTimer = null;
         // Clear the reference first, so the close event this causes is ignored.
@@ -232,11 +281,22 @@ export function createWebSocketDataFeed(options: WebSocketDataFeedOptions): Mark
           subscription.onStatusChange?.('streaming');
           const message = options.subscribeMessage?.(subscription);
           if (message !== undefined) ws.send(JSON.stringify(message));
+          armIdle(ws);
+          const heartbeat = options.heartbeat;
+          if (heartbeat && heartbeat.intervalMs > 0) {
+            heartbeatTimer = setInterval(() => {
+              if (stopped || socket !== ws) return;
+              const beat = typeof heartbeat.message === 'function' ? (heartbeat.message as () => unknown)() : heartbeat.message;
+              ws.send(typeof beat === 'string' ? beat : JSON.stringify(beat));
+            }, heartbeat.intervalMs);
+          }
         });
 
         ws.addEventListener('message', event => {
           // Messages can still arrive between close() and the socket closing.
           if (stopped || socket !== ws) return;
+          armIdle(ws);
+          if (options.heartbeat?.isReply?.(event.data)) return;
           try {
             const payload = JSON.parse(event.data);
             const parsed = options.parseMessage(payload);
@@ -258,6 +318,7 @@ export function createWebSocketDataFeed(options: WebSocketDataFeedOptions): Mark
           // A close we asked for leaves socket already cleared.
           if (stopped || socket !== ws) return;
           socket = null;
+          clearLiveness();
           scheduleRetry();
         });
 

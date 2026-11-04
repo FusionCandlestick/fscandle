@@ -23,6 +23,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- WebSocket feeds take `idleTimeoutMs`: an open socket that sends nothing for
+  that long is closed and reconnected, so a connection that stays up but stops
+  delivering is not mistaken for a quiet market forever. `heartbeat` sends a
+  keep-alive on an interval, and its `isReply` keeps the server's replies out
+  of `parseMessage`. Both are off by default.
 - `updateData` takes an array of bars. The batch is applied with one indicator
   recalculation and one redraw, and the `dataChange` event carries every bar in
   `bars`. The React component applies appended bars this way.
