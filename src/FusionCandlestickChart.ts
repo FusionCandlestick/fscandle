@@ -1836,6 +1836,9 @@ export class FusionCandlestickChart {
     input.addEventListener('blur', commit);
     this._container.appendChild(input);
     requestAnimationFrame(() => {
+      // The editor can be gone by the next frame: committed, cancelled, or the
+      // chart destroyed. Focusing a detached input would do nothing useful.
+      if (!input.isConnected) return;
       input.focus();
       input.select();
     });

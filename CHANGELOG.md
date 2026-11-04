@@ -36,6 +36,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   like an indicator pane, and primitives can target it by id. A callback that
   throws is reported once and that pane is skipped until it is re-added.
 
+### Fixed
+
+- The inline text editor focused its input on the next frame even if the chart
+  had been destroyed or the edit ended in between. It now checks the input is
+  still in the page first.
+
 ## [0.1.2] - 2026-11-02
 
 ### Added
