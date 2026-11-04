@@ -10,6 +10,7 @@ import { createChart, FusionCandlestickChart } from 'fscandle';
 const chart = createChart(container, options);
 chart.setData(klineData);
 chart.updateData(nextBar);
+chart.updateData([barA, barB, barC]); // several bars: one recalculation and one redraw
 chart.setTheme('light');   // or 'dark': background, text, grid and crosshair colours
 chart.destroy();
 ```

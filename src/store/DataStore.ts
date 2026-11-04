@@ -159,12 +159,20 @@ export class DataStore {
    * one — a backfill or a correction, which is the rare case — still falls back
    * to sorting and rebuilding.
    */
-  public addData(data: KLineData) {
+  /**
+   * Add one bar, replacing the bar with the same timestamp if there is one.
+   *
+   * Returns the index of the first bar that changed: the replaced bar, the
+   * appended one, or the position an out-of-order bar was inserted at. Every
+   * bar before that index is unchanged, which is what lets derived data such as
+   * indicators recompute only from there.
+   */
+  public addData(data: KLineData): number {
     const existingIndex = this._timestampIndex.get(data.timestamp);
     if (existingIndex !== undefined) {
       this._dataList[existingIndex] = data;
       this._notify();
-      return;
+      return existingIndex;
     }
 
     const lastIndex = this._dataList.length - 1;
@@ -172,7 +180,7 @@ export class DataStore {
       this._dataList.push(data);
       this._appendToTimeScale();
       this._notify();
-      return;
+      return this._dataList.length - 1;
     }
 
     // Out of order: the bar belongs somewhere inside the series.
@@ -180,6 +188,7 @@ export class DataStore {
     this._dataList.sort((a, b) => a.timestamp - b.timestamp);
     this._rebuildTimeScale();
     this._notify();
+    return this._timestampIndex.get(data.timestamp) ?? 0;
   }
 
   /** Extend the time scale by the single bar just pushed onto the end. */

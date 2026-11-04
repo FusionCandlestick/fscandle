@@ -33,6 +33,39 @@ export interface IndicatorRenderParams {
   styles?: IndicatorOptions;
 }
 
+/**
+ * Incremental recalculation after a live update.
+ *
+ * An update only changes bars from some index onward, so an indicator is
+ * recomputed over that tail plus TAIL_WARMUP bars before it, and the new rows
+ * are spliced onto the unchanged prefix. Smoothed indicators (EMA, RSI, ADX and
+ * the like) depend on all earlier bars, but that dependence fades: after this
+ * many warm-up bars the difference is far below floating-point noise.
+ *
+ * To be sure, the TAIL_CHECK rows just before the change are compared with the
+ * previous result first. An indicator that does not converge (OBV and VWAP are
+ * running totals over the whole series) fails the check, is recomputed in full,
+ * and is not offered the tail path again.
+ */
+const TAIL_WARMUP = 700;
+const TAIL_CHECK = 50;
+const TAIL_TOLERANCE = 1e-9;
+
+function sameValue(a: number | null | undefined, b: number | null | undefined): boolean {
+  const aFinite = typeof a === 'number' && Number.isFinite(a);
+  const bFinite = typeof b === 'number' && Number.isFinite(b);
+  if (!aFinite || !bFinite) return aFinite === bFinite;
+  return Math.abs(a - b) <= TAIL_TOLERANCE * Math.max(1, Math.abs(a), Math.abs(b));
+}
+
+function sameRow(a: IndicatorResultRow | undefined, b: IndicatorResultRow | undefined): boolean {
+  if (!a || !b) return false;
+  for (const key of Object.keys(b)) {
+    if (!sameValue(a[key], b[key])) return false;
+  }
+  return true;
+}
+
 /** The look an indicator falls back to when no options were passed down. */
 const BUILT_IN_INDICATOR_STYLES: IndicatorOptions = defaultOptions.indicators;
 
@@ -96,8 +129,42 @@ export class Indicator {
     return min === Infinity ? null : { min, max };
   }
 
+  /** Set once the tail path gave a different answer than a full recalculation. */
+  private _tailUnreliable = false;
+
   public calc(dataList: KLineData[]) {
     this.result = this.template.calc(dataList, this.template.calcParams);
+    return this.result;
+  }
+
+  /**
+   * Recompute after the bars from `changedFrom` onward changed, reusing the
+   * unchanged prefix of the previous result when that gives the same answer as
+   * a full recalculation. See TAIL_WARMUP.
+   */
+  public calcFrom(dataList: KLineData[], changedFrom: number) {
+    const start = changedFrom - TAIL_WARMUP;
+    const canUseTail =
+      !this._tailUnreliable &&
+      Number.isFinite(changedFrom) &&
+      start > 0 &&
+      changedFrom <= dataList.length &&
+      this.result.length >= changedFrom;
+    if (!canUseTail) return this.calc(dataList);
+
+    const tail = this.template.calc(dataList.slice(start), this.template.calcParams);
+    if (tail.length !== dataList.length - start) {
+      this._tailUnreliable = true;
+      return this.calc(dataList);
+    }
+    for (let index = changedFrom - TAIL_CHECK; index < changedFrom; index += 1) {
+      if (!sameRow(tail[index - start], this.result[index])) {
+        this._tailUnreliable = true;
+        return this.calc(dataList);
+      }
+    }
+
+    this.result = this.result.slice(0, changedFrom).concat(tail.slice(changedFrom - start));
     return this.result;
   }
 

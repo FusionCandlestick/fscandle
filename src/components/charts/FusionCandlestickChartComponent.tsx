@@ -233,7 +233,7 @@ export const FusionCandlestickChartComponent: React.FC<FusionCandlestickChartPro
     if (plan.kind === 'set') {
       chart.setData(plan.data);
     } else if (plan.kind === 'upsert') {
-      plan.bars.forEach(bar => chart.updateData(bar));
+      chart.updateData(plan.bars);
     }
   }, [data]);
 

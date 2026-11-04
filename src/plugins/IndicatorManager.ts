@@ -69,6 +69,15 @@ export class IndicatorManager {
     });
   }
 
+  /** Recompute after the bars from `changedFrom` onward changed. */
+  public calcFrom(dataList: KLineData[], changedFrom: number) {
+    this._indicators.forEach(indicators => {
+      indicators.forEach(indicator => {
+        indicator.calcFrom(dataList, changedFrom);
+      });
+    });
+  }
+
   /** Drawing style for every indicator this manager renders. */
   public setStyles(styles: IndicatorOptions) {
     this._styles = styles;

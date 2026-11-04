@@ -51,8 +51,10 @@ export interface DataChangeParams {
   reason: 'set' | 'update';
   /** Bar count after the change. */
   count: number;
-  /** The bar that was appended or replaced, for `update`. */
+  /** The bar that was appended or replaced, for `update`. For a batch, the last one. */
   bar: KLineData | null;
+  /** Every bar of an `update`, in the order given. Empty for `set`. */
+  bars?: KLineData[];
 }
 
 /** All chart-level events, keyed by name. */

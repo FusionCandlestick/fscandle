@@ -6,8 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Live updates no longer recompute every indicator over the whole series.
+  `updateData` recomputes each indicator from the first changed bar, with 700
+  bars of warm-up, and checks the overlap against the previous result before
+  reusing it. On 20,000 bars with MA, BOLL, MACD, RSI and KDJ, one update went
+  from about 39 ms to about 1.7 ms in Chromium. OBV and VWAP are running totals
+  over the whole series, so they keep a full recalculation; the result is the
+  same either way.
+
 ### Added
 
+- `updateData` takes an array of bars. The batch is applied with one indicator
+  recalculation and one redraw, and the `dataChange` event carries every bar in
+  `bars`. The React component applies appended bars this way.
 - `addCustomPane(options)` and `removeCustomPane(id)`: a pane whose body is
   drawn by a callback, with its own optional price range. It sits in the stack
   like an indicator pane, and primitives can target it by id. A callback that

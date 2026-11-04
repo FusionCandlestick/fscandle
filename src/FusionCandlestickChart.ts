@@ -202,7 +202,7 @@ export type SeriesTarget = 'main' | string;
 export interface SeriesApi {
   getData: () => KLineData[];
   setData: (data: KLineData[]) => void;
-  updateData: (data: KLineData) => void;
+  updateData: (data: KLineData | readonly KLineData[]) => void;
   setChartStyle: (type: ConfigurablePriceSeriesStyle) => void;
   removeAt: (index: number) => void;
   /**
@@ -3481,14 +3481,25 @@ export class FusionCandlestickChart {
     this._events.emit('dataChange', { reason: 'set', count: data.length, bar: null });
   }
 
-  public updateData(data: KLineData) {
+  /**
+   * Append bars or replace bars with the same timestamp. Pass an array to
+   * apply several at once: indicators are recomputed and the chart redrawn
+   * once for the whole batch, rather than once per bar.
+   */
+  public updateData(data: KLineData | readonly KLineData[]) {
+    const bars: readonly KLineData[] = Array.isArray(data) ? data : [data as KLineData];
+    if (bars.length === 0) return;
+
     const currentData = this._dataStore.getData();
     const previousLastIndex = currentData.length - 1;
     const shouldFollowLatest = currentData.length === 0 || this._offset >= previousLastIndex - 0.5;
 
-    this._dataStore.addData(data);
+    let changedFrom = Number.POSITIVE_INFINITY;
+    for (const bar of bars) {
+      changedFrom = Math.min(changedFrom, this._dataStore.addData(bar));
+    }
     const nextData = this._dataStore.getData();
-    this._indicatorManager.calcAll(nextData);
+    this._indicatorManager.calcFrom(nextData, changedFrom);
     this._autoScale(false);
 
     if (shouldFollowLatest) {
@@ -3498,7 +3509,7 @@ export class FusionCandlestickChart {
 
     this._enforceHorizontalViewportBounds();
     this.update(InvalidationLevel.Full);
-    this._events.emit('dataChange', { reason: 'update', count: nextData.length, bar: data });
+    this._events.emit('dataChange', { reason: 'update', count: nextData.length, bar: bars[bars.length - 1], bars: [...bars] });
   }
 
   public getData(): KLineData[] {
