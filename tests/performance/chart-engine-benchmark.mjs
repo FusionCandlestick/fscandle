@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
+import { build } from 'esbuild';
 
 const makeBars = count => {
   const bars = [];
@@ -70,8 +71,93 @@ const rangeScan = benchmark('visible range min/max scan', () => {
   return { min, max };
 }, 100);
 
+/**
+ * Live updates with indicators attached: the per-update cost of keeping five
+ * indicators current on 20,000 bars, through the same DataStore and Indicator
+ * code the chart runs. Recomputing every indicator over the whole series on
+ * each update took about 39 ms per update in Chromium; the incremental path
+ * takes a small fraction of that. Two limits guard it: an absolute ceiling
+ * per update, and a ratio against a full recalculation measured on the same
+ * machine, which stays meaningful on a slow CI runner.
+ */
+const engine = await (async () => {
+  const result = await build({
+    stdin: {
+      contents: "export { DataStore } from './src/store/DataStore'; export { Indicator, DEFAULT_INDICATOR_TEMPLATES } from './src/plugins/Indicator';",
+      resolveDir: process.cwd(),
+      loader: 'ts',
+    },
+    bundle: true,
+    format: 'esm',
+    platform: 'node',
+    write: false,
+    logLevel: 'silent',
+  });
+  const code = result.outputFiles[0].text;
+  return import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'));
+})();
+
+const LIVE_BARS = 20_000;
+const LIVE_UPDATES = 200;
+const LIVE_INDICATORS = ['MA', 'BOLL', 'MACD', 'RSI', 'KDJ'];
+const MAX_MS_PER_UPDATE = 8;
+const MIN_SPEEDUP = 5;
+
+const liveSetup = () => {
+  const store = new engine.DataStore();
+  store.setData(makeBars(LIVE_BARS));
+  const indicators = LIVE_INDICATORS.map(name => {
+    const template = engine.DEFAULT_INDICATOR_TEMPLATES.find(item => item.shortName === name);
+    const indicator = new engine.Indicator(name, template);
+    indicator.calc(store.getData());
+    return indicator;
+  });
+  return { store, indicators };
+};
+
+// One update in four appends a bar; the rest move the last bar's close, as a tick does.
+const liveTick = (store, i) => {
+  const data = store.getData();
+  const last = data[data.length - 1];
+  const bar = i % 4 === 3
+    ? { ...last, timestamp: last.timestamp + 60_000, open: last.close }
+    : { ...last, close: last.close + 1, high: Math.max(last.high, last.close + 1) };
+  return store.addData(bar);
+};
+
+const timeUpdates = useTail => {
+  const { store, indicators } = liveSetup();
+  const start = performance.now();
+  for (let i = 0; i < LIVE_UPDATES; i++) {
+    const changedFrom = liveTick(store, i);
+    for (const indicator of indicators) {
+      if (useTail) indicator.calcFrom(store.getData(), changedFrom);
+      else indicator.calc(store.getData());
+    }
+  }
+  return (performance.now() - start) / LIVE_UPDATES;
+};
+
+const fullMsPerUpdate = timeUpdates(false);
+const liveMsPerUpdate = timeUpdates(true);
+const liveSpeedup = fullMsPerUpdate / liveMsPerUpdate;
+assert.ok(
+  liveMsPerUpdate <= MAX_MS_PER_UPDATE,
+  `live update with ${LIVE_INDICATORS.length} indicators on ${LIVE_BARS} bars took ${liveMsPerUpdate.toFixed(3)}ms, limit ${MAX_MS_PER_UPDATE}ms`,
+);
+assert.ok(
+  liveSpeedup >= MIN_SPEEDUP,
+  `incremental indicator update is only ${liveSpeedup.toFixed(1)}x faster than a full recalculation, expected at least ${MIN_SPEEDUP}x`,
+);
+
 console.log(JSON.stringify({
   checks: [
+    {
+      label: `live update, ${LIVE_INDICATORS.length} indicators on ${LIVE_BARS} bars`,
+      msPerUpdate: Number(liveMsPerUpdate.toFixed(3)),
+      fullRecalcMsPerUpdate: Number(fullMsPerUpdate.toFixed(3)),
+      speedup: Number(liveSpeedup.toFixed(1)),
+    },
     { label: ingest.label, elapsedMs: Number(ingest.elapsed.toFixed(2)) },
     { label: sortedUpdates.label, elapsedMs: Number(sortedUpdates.elapsed.toFixed(2)), bars: sortedUpdates.result },
     { label: rangeScan.label, elapsedMs: Number(rangeScan.elapsed.toFixed(2)), range: rangeScan.result },
