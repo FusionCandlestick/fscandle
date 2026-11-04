@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { priceFormatOptions } from '../../src/model/priceFormat';
+import { formatPriceLabel, priceFormatOptions } from '../../src/model/priceFormat';
 
 const fmt = (price: number, step?: number) =>
   price.toLocaleString('en-US', priceFormatOptions(price, step));
@@ -45,5 +45,23 @@ describe('priceFormatOptions', () => {
   it('is stable without a step', () => {
     assert.equal(fmt(155), '155.00');
     assert.equal(fmt(250_000), '250,000');
+  });
+});
+
+describe('formatPriceLabel', () => {
+  it('writes the same text as toLocaleString with priceFormatOptions', () => {
+    const prices = [0, 0.000012345, 0.5, 1.23456, 99.999, 1234.5, 98765.4321, 123456.789, -42.125];
+    const steps = [undefined, 0.01, 0.0005, 1, 50];
+    for (const locale of ['en-US', 'de-DE', 'zh-CN']) {
+      for (const price of prices) {
+        for (const step of steps) {
+          assert.equal(
+            formatPriceLabel(price, locale, step),
+            price.toLocaleString(locale, priceFormatOptions(price, step)),
+            `${locale} ${price} step ${step}`,
+          );
+        }
+      }
+    }
   });
 });

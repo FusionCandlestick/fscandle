@@ -24,7 +24,8 @@ export interface AxisTickContext {
 
 const formatterCache = new Map<string, Intl.DateTimeFormat>();
 
-function getFormatter(
+/** An `Intl.DateTimeFormat` built once per locale, time zone and option set. */
+export function getFormatter(
   locale: string,
   timeZone: string | undefined,
   options: Intl.DateTimeFormatOptions,

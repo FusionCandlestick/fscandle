@@ -32,7 +32,7 @@ import { Axis } from './engine/Axis';
 import { cloneOptionTree, mergeOptionTree } from './model/optionTree';
 import { findUnknownOptionPaths } from './model/optionSchema';
 import { assignPriceScaleColumns } from './model/priceScaleLayout';
-import { priceFormatOptions } from './model/priceFormat';
+import { formatPriceLabel } from './model/priceFormat';
 import { PriceExtentCache } from './model/priceExtent';
 import {
   PriceLineRegistry,
@@ -2928,10 +2928,7 @@ export class FusionCandlestickChart {
   private _formatPriceValue(price: number): string {
     const formatter = this._options.localization.priceFormatter;
     if (formatter) return formatter(price);
-    return price.toLocaleString(
-      this._options.localization.locale,
-      priceFormatOptions(price, this._viewportPriceStep()),
-    );
+    return formatPriceLabel(price, this._options.localization.locale, this._viewportPriceStep());
   }
 
   private _formatTimeValue(timestamp: number, context: 'axis' | 'crosshair' = 'crosshair'): string {
@@ -4268,17 +4265,9 @@ export class FusionCandlestickChart {
     transformer.setYScale(state.scale);
     transformer.setYOffset(state.offset);
 
-    if (this._options.timeScale.visible !== false && frame.level >= InvalidationLevel.Light) {
-      const rulerBounds = { width: realWidth, height: this._xAxisHeight, left: 0, top: 0 };
-      if (this._topXHeight > 0) {
-        const topXCtx = this._topXAxisCanvases.get('grid')!.getContext('2d')!;
-        this._xAxis.render(topXCtx, transformer, rulerBounds, 'top', this._dataStore);
-      }
-      if (this._bottomXHeight > 0) {
-        const bottomXCtx = this._bottomXAxisCanvases.get('grid')!.getContext('2d')!;
-        this._xAxis.render(bottomXCtx, transformer, rulerBounds, 'bottom', this._dataStore);
-      }
-    }
+    // The time rulers are shared and drawn once per frame by the main pane, which
+    // is rendered on every frame. Each indicator pane used to draw them again
+    // over the same pixels.
 
     if (level >= InvalidationLevel.Light) {
       // Grid rendering is handled by GridPrimitive.

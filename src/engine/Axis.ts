@@ -2,8 +2,8 @@ import { Bounding } from '../types';
 import { CoordinateTransformer } from './CoordinateTransformer';
 import { ChartOptions } from '../types/options';
 import { DataStore } from '../store/DataStore';
-import { TimeFormatter } from '../model/timeFormat';
-import { priceFormatOptions } from '../model/priceFormat';
+import { getFormatter, TimeFormatter } from '../model/timeFormat';
+import { formatPriceLabel } from '../model/priceFormat';
 
 export class Axis {
   private _type: 'x' | 'y';
@@ -94,16 +94,18 @@ export class Axis {
     }
 
     // No declared period: fall back to picking granularity from bar spacing.
+    // The formatters are cached: building one per label was the largest cost of
+    // a redraw.
     const date = new Date(timestamp);
     const locale = this._options.localization.locale;
     const timeZone = this._options.localization.timeZone;
     if (spacing > 20) {
-      return new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit', hour12: false, timeZone }).format(date);
+      return getFormatter(locale, timeZone, { hour: '2-digit', minute: '2-digit', hour12: false }).format(date);
     }
     if (spacing > 1) {
-      return new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', timeZone }).format(date);
+      return getFormatter(locale, timeZone, { month: 'short', day: 'numeric' }).format(date);
     }
-    return new Intl.DateTimeFormat(locale, { month: 'short', timeZone }).format(date);
+    return getFormatter(locale, timeZone, { month: 'short' }).format(date);
   }
 
   private _getVisiblePriceBounds(transformer: CoordinateTransformer, height: number) {
@@ -147,7 +149,7 @@ export class Axis {
     if (side === 'right' && loc.rightPriceFormatter) return loc.rightPriceFormatter(price);
     if (loc.priceFormatter) return loc.priceFormatter(price);
 
-    return price.toLocaleString(loc.locale, priceFormatOptions(price, step));
+    return formatPriceLabel(price, loc.locale, step);
   }
 
   private _getNiceStep(roughStep: number): number {

@@ -15,6 +15,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   from about 39 ms to about 1.7 ms in Chromium. OBV and VWAP are running totals
   over the whole series, so they keep a full recalculation; the result is the
   same either way.
+- Redrawing after an update costs less. Price labels and the fallback time
+  labels reuse their `Intl` formatters instead of building one per label, and
+  indicator panes no longer redraw the shared time rulers that the main pane
+  already draws. With four panes, a frame after a live update went from a
+  median of about 8.5 ms to about 3.2 ms in Chromium. Label text is unchanged.
 
 ### Added
 

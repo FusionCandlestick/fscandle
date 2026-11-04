@@ -28,6 +28,33 @@ export function priceFormatOptions(price: number, step?: number): Intl.NumberFor
   return { minimumFractionDigits: digits, maximumFractionDigits: digits };
 }
 
+const numberFormatCache = new Map<string, Intl.NumberFormat>();
+
+/**
+ * A price label, written by the rules of `priceFormatOptions`.
+ *
+ * The same text as `price.toLocaleString(locale, priceFormatOptions(price, step))`,
+ * but the `Intl.NumberFormat` behind it is built once per locale and option set
+ * rather than on every call: axis ticks, tags and readouts format dozens of
+ * prices per frame, and building the formatter dominated the cost.
+ */
+export function formatPriceLabel(price: number, locale: string | undefined, step?: number): string {
+  const options = priceFormatOptions(price, step);
+  const key = [
+    locale ?? '',
+    options.notation ?? '',
+    options.minimumFractionDigits ?? '',
+    options.maximumFractionDigits ?? '',
+    options.maximumSignificantDigits ?? '',
+  ].join('|');
+  let formatter = numberFormatCache.get(key);
+  if (!formatter) {
+    formatter = new Intl.NumberFormat(locale, options);
+    numberFormatCache.set(key, formatter);
+  }
+  return formatter.format(price);
+}
+
 /** Digits after the decimal point of a plain or `1e-7`-style number literal. */
 function fractionDigitsOf(n: number): number {
   const s = n.toString();
