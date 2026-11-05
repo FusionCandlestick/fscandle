@@ -28,6 +28,8 @@ import { HeikinAshiSeries } from './engine/HeikinAshiSeries';
 import { OverlayManager, Overlay, OverlayPoint, OverlayTemplate } from './engine/OverlayManager';
 import { openOverlayTextEditor, pickImageFile } from './gui/OverlayTextEditor';
 import { composeScreenshot } from './renderer/screenshot';
+import { buildLegendContent, buildToolbarContentItems } from './gui/contentModel';
+import type { SeriesColorOptions } from './gui/contentModel';
 import { createDrawingOverlay, parseDrawingMode, requiredDrawingPointCount } from './engine/drawingModes';
 import type { OverlayTextEditorHost } from './gui/OverlayTextEditor';
 import { OverlayPrimitive } from './engine/OverlayPrimitive';
@@ -81,9 +83,7 @@ import type { ToolbarHost, ToolbarContentItem } from './gui/types';
 import type { LegendWidget } from './gui/LegendWidget';
 import type {
   LegendHost,
-  LegendIndicatorEntry,
   LegendPaneContent,
-  LegendSeriesEntry,
   LegendSeriesKind,
 } from './gui/LegendWidget';
 import {
@@ -110,7 +110,6 @@ import {
   formatToolbarLabel,
   indicatorDisplayLabel,
   overlayDisplayLabel,
-  pickSeriesColor,
   seriesDisplayLabel,
 } from './gui/displayLabels';
 import { getAxisRailColors, isLightColor } from './renderer/colors';
@@ -166,15 +165,6 @@ interface PriceScaleDescriptor {
   yScale: number;
   yOffset: number;
   isPrimary: boolean;
-}
-
-interface SeriesColorOptions {
-  upColor?: string;
-  downColor?: string;
-  borderUpColor?: string;
-  borderDownColor?: string;
-  lineColor?: string;
-  topColor?: string;
 }
 
 export interface TimeScaleApi {
@@ -4114,61 +4104,21 @@ export class FusionCandlestickChart {
     const allData = this._dataStore.getData();
     const hovered = this._hoveredData || allData[allData.length - 1];
     if (!hovered) return [];
-    const index = this._hoveredData ? this._resolveHoveredIndex(allData) : allData.length - 1;
-
-    const content: LegendPaneContent[] = [];
-    this._panes.forEach(pane => {
-      const element = this._legendDOMs.get(pane.getId());
-      if (!element) return;
-
-      const series: LegendSeriesEntry[] = [];
-      if (pane.getId() === 'main') {
-        if (this._mainSeries) {
-          series.push({
-            kind: 'main',
-            id: 'main',
-            label: seriesDisplayLabel(this._mainSeries, this._t),
-            bar: hovered,
-            upColor: '#26a69a',
-            downColor: '#ef5350',
-            hidden: this._hiddenSeriesIds.has('main'),
-          });
-        }
-        this._stackedScales.forEach(({ id, series: stackedSeries, data: stackedData }) => {
-          const bar = stackedData?.[index];
-          if (!bar) return;
-          const options = stackedSeries.getOptions() as SeriesColorOptions;
-          series.push({
-            kind: 'stacked',
-            id,
-            label: formatToolbarLabel(id),
-            bar,
-            upColor: pickSeriesColor(options.borderUpColor, options.upColor),
-            downColor: pickSeriesColor(options.borderDownColor, options.downColor),
-            hidden: this._hiddenSeriesIds.has(id),
-          });
-        });
-      }
-
-      const indicators: LegendIndicatorEntry[] = this._indicatorManager
-        .getValuesAt(pane.getId(), index)
-        .map(indicator => ({
-          id: indicator.id,
-          name: indicator.name,
-          values: indicator.figures.map(figure => {
-            const value = indicator.data?.[figure.key];
-            return {
-              key: figure.key,
-              text: typeof value === 'number' && !Number.isNaN(value)
-                ? this._formatPriceValue(value)
-                : this._i18n.t('value.notAvailable'),
-            };
-          }),
-        }));
-
-      content.push({ paneId: pane.getId(), element, series, indicators });
+    return buildLegendContent({
+      bar: hovered,
+      index: this._hoveredData ? this._resolveHoveredIndex(allData) : allData.length - 1,
+      panes: this._panes.map(pane => ({ id: pane.getId(), element: this._legendDOMs.get(pane.getId()) })),
+      mainSeriesLabel: this._mainSeries ? seriesDisplayLabel(this._mainSeries, this._t) : null,
+      stacked: this._stackedScales.all().map(scale => ({
+        id: scale.id,
+        options: scale.series.getOptions() as SeriesColorOptions,
+        data: scale.data,
+      })),
+      hidden: this._hiddenSeriesIds,
+      indicatorValuesAt: (paneId, index) => this._indicatorManager.getValuesAt(paneId, index),
+      formatValue: value => this._formatPriceValue(value),
+      notAvailable: this._i18n.t('value.notAvailable'),
     });
-    return content;
   }
 
   private _toggleSeriesVisibility(id: string): void {
@@ -4408,55 +4358,23 @@ export class FusionCandlestickChart {
    */
 
   private _getToolbarContentItems(): ToolbarContentItem[] {
-    const items: ToolbarContentItem[] = [];
-
-    this._series.forEach((series, index) => {
-      items.push({
-        kind: 'series',
-        id: String(index),
-        label: seriesDisplayLabel(series, this._t),
-        color: series === this._mainSeries ? '#2962FF' : this._options.layout.textColor,
-      });
-    });
-
-    this._stackedScales.forEach(({ id, series }) => {
-      const seriesOptions = series.getOptions() as SeriesColorOptions;
-      items.push({
-        kind: 'stacked',
-        id,
-        label: formatToolbarLabel(id),
-        color: typeof seriesOptions.borderUpColor === 'string'
-          ? seriesOptions.borderUpColor
-          : typeof seriesOptions.lineColor === 'string'
-            ? seriesOptions.lineColor
-            : typeof seriesOptions.topColor === 'string'
-              ? seriesOptions.topColor
-              : this._options.layout.textColor,
-      });
-    });
-
-    this._panes.forEach(pane => {
-      this._indicatorManager.getIndicators(pane.getId()).forEach(indicator => {
-        items.push({
-          kind: 'indicator',
+    return buildToolbarContentItems({
+      series: this._series.map(series => ({ label: seriesDisplayLabel(series, this._t), isMain: series === this._mainSeries })),
+      stacked: this._stackedScales.all().map(scale => ({ id: scale.id, options: scale.series.getOptions() as SeriesColorOptions })),
+      indicators: this._panes.flatMap(pane =>
+        this._indicatorManager.getIndicators(pane.getId()).map(indicator => ({
           id: indicator.id,
           paneId: pane.getId(),
           label: indicatorDisplayLabel(indicator),
-          color: '#FF9800',
-        });
-      });
-    });
-
-    this._overlayManager.getOverlays().forEach(overlay => {
-      items.push({
-        kind: 'overlay',
+        })),
+      ),
+      overlays: this._overlayManager.getOverlays().map(overlay => ({
         id: overlay.id,
         label: overlayDisplayLabel(overlay.type, this._t),
-        color: overlay.color || this._options.layout.textColor,
-      });
+        color: overlay.color,
+      })),
+      textColor: this._options.layout.textColor,
     });
-
-    return items;
   }
 
   /** Export all current overlays (drawings) as a downloadable JSON file */
