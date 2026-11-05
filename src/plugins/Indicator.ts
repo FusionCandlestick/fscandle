@@ -17,6 +17,7 @@ import {
   StochasticRSI,
   VWAP,
 } from 'technicalindicators';
+import { DonchianTemplate, IchimokuTemplate, KeltnerTemplate, SuperTrendTemplate } from './trendIndicators';
 
 export type IndicatorResultRow = Record<string, number | null | undefined>;
 
@@ -652,4 +653,8 @@ export const DEFAULT_INDICATOR_TEMPLATES: IndicatorTemplate[] = [
   VWAPTemplate,
   StochasticRSITemplate,
   PSARTemplate,
+  DonchianTemplate,
+  KeltnerTemplate,
+  SuperTrendTemplate,
+  IchimokuTemplate,
 ];

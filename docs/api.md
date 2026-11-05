@@ -284,7 +284,9 @@ The built-in overlay engine is now mounted through an internal `OverlayPrimitive
 
 Built-in templates are registered by short name and full name:
 
-`MA`, `EMA`, `BOLL`, `MACD`, `RSI`, `KDJ`, `WR`, `VOLMA`, `ATR`, `ADX`, `ROC`, `CCI`, `OBV`, `VWAP`, `STOCHRSI`, `PSAR`.
+`MA`, `EMA`, `BOLL`, `MACD`, `RSI`, `KDJ`, `WR`, `VOLMA`, `ATR`, `ADX`, `ROC`, `CCI`, `OBV`, `VWAP`, `STOCHRSI`, `PSAR`, `DC` (Donchian channels), `KC` (Keltner channels), `SUPERTREND` and `ICHIMOKU`.
+
+The channel and trend indicators take these `calcParams`: `DC` `[20]` (period); `KC` `[20, 10, 2]` (EMA period, ATR period, ATR multiplier); `SUPERTREND` `[10, 3]` (ATR period, multiplier), drawn as an `up` line while the trend is up and a `down` line while it is down; `ICHIMOKU` `[9, 26, 52]` (conversion, base and span periods). Ichimoku's leading spans are shifted forward by the base period, so they have no values ahead of the last bar, and its lagging line is empty on the last base-period bars. These overlay price, so create them on the main pane (`newPane: false`).
 
 ```ts
 chart.createIndicator('ATR', { newPane: true, calcParams: [14] });

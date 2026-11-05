@@ -23,6 +23,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Four indicators: Donchian channels (`DC`), Keltner channels (`KC`),
+  `SUPERTREND` and `ICHIMOKU`, bringing the built-in set to 20. Their
+  templates are exported as `DonchianTemplate`, `KeltnerTemplate`,
+  `SuperTrendTemplate` and `IchimokuTemplate`.
 - WebSocket feeds take `idleTimeoutMs`: an open socket that sends nothing for
   that long is closed and reconnected, so a connection that stays up but stops
   delivering is not mistaken for a quiet market forever. `heartbeat` sends a

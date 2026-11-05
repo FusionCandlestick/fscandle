@@ -54,7 +54,7 @@ axis decorations. See [`docs/api.md`](docs/api.md).
 
 - Custom Canvas K-line renderer: candle, hollow, Heikin Ashi, bar, area, line, step line, baseline, and volume modes
 - Multiple panes, multi-column price axes, synced charts, and overlay drawing tools
-- Built-in indicators: MA, EMA, BOLL, MACD, RSI, KDJ, WR, VOLMA, ATR, ADX, ROC, CCI, OBV, VWAP, STOCHRSI, PSAR
+- Built-in indicators: MA, EMA, BOLL, MACD, RSI, KDJ, WR, VOLMA, ATR, ADX, ROC, CCI, OBV, VWAP, STOCHRSI, PSAR, DC (Donchian), KC (Keltner), SUPERTREND, ICHIMOKU
 - Crosshair axis labels, screenshot export, magnet snapping, local state persistence
 - `timeScale()`, `priceScale()`, `series()`, `pane()` facade APIs
 - Declarative custom series via `defineSeriesType`; custom overlays via figure descriptors

@@ -134,6 +134,7 @@ export {
   PSARTemplate,
 } from './plugins/Indicator';
 export type { IndicatorRenderParams, IndicatorTemplate } from './plugins/Indicator';
+export { DonchianTemplate, IchimokuTemplate, KeltnerTemplate, SuperTrendTemplate } from './plugins/trendIndicators';
 export { IndicatorManager } from './plugins/IndicatorManager';
 export type { CreateIndicatorOptions } from './plugins/IndicatorManager';
 export { AnchoredTextPrimitive } from './plugins/primitives/AnchoredTextPrimitive';
