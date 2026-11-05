@@ -26,6 +26,10 @@ import { VolumeSeries, VolumeSeriesOptions } from './engine/VolumeSeries';
 import { HollowCandlestickSeries } from './engine/HollowCandlestickSeries';
 import { HeikinAshiSeries } from './engine/HeikinAshiSeries';
 import { OverlayManager, Overlay, OverlayPoint, OverlayTemplate } from './engine/OverlayManager';
+import { openOverlayTextEditor, pickImageFile } from './gui/OverlayTextEditor';
+import { composeScreenshot } from './renderer/screenshot';
+import { createDrawingOverlay, parseDrawingMode, requiredDrawingPointCount } from './engine/drawingModes';
+import type { OverlayTextEditorHost } from './gui/OverlayTextEditor';
 import { OverlayPrimitive } from './engine/OverlayPrimitive';
 import { OverlayHistory } from './engine/OverlayHistory';
 import { Axis } from './engine/Axis';
@@ -1100,29 +1104,6 @@ export class FusionCandlestickChart {
     return chartY - (paneTop - (this._toolbarHeight + this._topXHeight));
   }
 
-  private _getRequiredDrawingPointCount(type: string | null) {
-    if (!type) return 0;
-    const drawing = this._parseDrawingMode(type);
-    if (drawing.family === 'annotation') return 1;
-    if (drawing.family === 'channel') return 3;
-    if (drawing.family === 'wave') {
-      if (drawing.variant === 'five') return 6;
-      if (drawing.variant === 'abcde') return 5;
-      return 4;
-    }
-    if (
-      drawing.family === 'line' &&
-      ['horizontal', 'vertical', 'horizontal-ray', 'vertical-ray', 'price'].includes(drawing.variant)
-    ) return 1;
-    // Registered templates (including third-party ones) declare their own
-    // point count via `totalStep`; the built-in families above keep their
-    // variant-specific counts.
-    if (drawing.family !== 'line' && this._overlayManager.getTemplate(drawing.family)) {
-      return this._overlayManager.getTotalStep(drawing.family);
-    }
-    return 2;
-  }
-
   /**
    * Run a template's per-step `onPlace` hook. Returns false when the step
    * rejected the point, in which case the caller must not advance.
@@ -1133,83 +1114,15 @@ export class FusionCandlestickChart {
     return step.onPlace(overlay, point, stepIndex) !== false;
   }
 
+  /** The point count a registered template declares, or null when none is registered. */
+  private _templateTotalStep(family: string): number | null {
+    return this._overlayManager.getTemplate(family) ? this._overlayManager.getTotalStep(family) : null;
+  }
+
   /** Hint text for the drawing step currently awaiting a click, if any. */
   public getCurrentDrawStepHint(): string | null {
     if (!this._isCreatingOverlay || !this._drawingOverlay) return null;
     return this._overlayManager.getDrawStep(this._drawingOverlay.type, this._drawingFixedPointCount)?.hint ?? null;
-  }
-
-  private _parseDrawingMode(type: string) {
-    const [family, variant = 'default'] = type.split(':');
-    return { family, variant };
-  }
-
-  private _createDrawingOverlay(type: string, points: OverlayPoint[]): Overlay {
-    const { family, variant } = this._parseDrawingMode(type);
-    const drawingColor = this._drawingDefaults.color;
-    const drawingLineWidth = this._drawingDefaults.lineWidth;
-    if (family === 'line') {
-      const direction = variant.includes('horizontal') || variant === 'price'
-        ? 'horizontal'
-        : variant.includes('vertical')
-          ? 'vertical'
-          : 'free';
-      return {
-        id: createId('overlay'),
-        type: 'line',
-        points,
-        color: drawingColor,
-        lineWidth: drawingLineWidth,
-        line: {
-          direction,
-          extendStart: variant === 'trend' || variant === 'infinite' || variant === 'horizontal' || variant === 'vertical' || variant === 'price',
-          extendEnd: variant === 'trend' || variant === 'infinite' || variant === 'ray' || variant === 'horizontal' || variant === 'vertical' || variant === 'horizontal-ray' || variant === 'vertical-ray' || variant === 'price',
-          showPriceLabel: variant === 'price',
-        },
-      };
-    }
-    if (family === 'channel') {
-      return {
-        id: createId('overlay'),
-        type: 'channel',
-        points,
-        color: drawingColor,
-        lineWidth: drawingLineWidth,
-        channel: { mode: variant === 'price' ? 'price' : 'parallel' },
-      };
-    }
-    if (family === 'annotation') {
-      return {
-        id: createId('overlay'),
-        type: 'annotation',
-        points,
-        color: drawingColor,
-        lineWidth: drawingLineWidth,
-        annotation: {
-          kind: variant === 'default' || variant.startsWith('event-')
-            ? (variant.startsWith('event-') ? 'tag' : 'text')
-            : variant as 'text' | 'arrow' | 'image' | 'tag',
-          placement: variant === 'tag' || variant.startsWith('event-') ? 'bottom' : 'floating',
-        },
-      };
-    }
-    if (family === 'wave') {
-      return {
-        id: createId('overlay'),
-        type: 'wave',
-        points,
-        color: drawingColor,
-        lineWidth: drawingLineWidth,
-        wave: { kind: variant === 'default' ? 'three' : variant as 'three' | 'five' | 'abcd' | 'abcde' },
-      };
-    }
-    return {
-      id: createId('overlay'),
-      type,
-      points,
-      color: drawingColor,
-      lineWidth: drawingLineWidth,
-    };
   }
 
   private _getPointFromResolvedDrawingPoint(point: { time: number; price: number }) {
@@ -1683,165 +1596,22 @@ export class FusionCandlestickChart {
    * the image-annotation replace flow and the image drawing tool. No-ops when
    * there is no DOM.
    */
-  private _pickImageForAnnotation(
-    onDecoded: (dataUrl: string, img: HTMLImageElement) => void,
-  ): void {
-    if (typeof document === 'undefined') return;
-
-    const fileInput = document.createElement('input');
-    fileInput.type = 'file';
-    fileInput.accept = 'image/*';
-    fileInput.style.display = 'none';
-
-    fileInput.onchange = () => {
-      const file = fileInput.files?.[0];
-      if (!file) {
-        fileInput.remove();
-        return;
-      }
-
-      const MAX_BYTES = 300 * 1024;
-      if (file.size > MAX_BYTES) {
-        alert(
-          `Image is ${(file.size / 1024).toFixed(1)} KB, over the 300 KB limit. ` +
-            'Choose an image of 300 KB or less.',
-        );
-        fileInput.remove();
-        return;
-      }
-
-      const reader = new FileReader();
-      reader.onload = () => {
-        const dataUrl = reader.result as string;
-        const img = new Image();
-        img.onload = () => onDecoded(dataUrl, img);
-        img.src = dataUrl;
-        fileInput.remove();
-      };
-      reader.readAsDataURL(file);
-    };
-
-    document.body.appendChild(fileInput);
-    fileInput.click();
+  public startEditingOverlayText(overlay: Overlay) {
+    openOverlayTextEditor(this._createOverlayTextEditorHost(), overlay);
   }
 
-  public startEditingOverlayText(overlay: Overlay) {
-    if (typeof document === 'undefined') return;
-
-    if (overlay.annotation?.kind === 'image') {
-      // Replace the annotation's image through the shared picker (300 KB cap).
-      this._pickImageForAnnotation((dataUrl, img) => {
-        overlay.imageUrl = dataUrl;
-        overlay._imageCache = img;
+  private _createOverlayTextEditorHost(): OverlayTextEditorHost {
+    return {
+      container: () => this._container,
+      transformer: () => this._coordinateTransformer,
+      dataStore: () => this._dataStore,
+      plotOrigin: () => ({ left: this._leftYAxisWidth, top: this._toolbarHeight + this._topXHeight }),
+      fontFamily: () => this._options.layout.fontFamily,
+      overlayChanged: () => {
         this.update(InvalidationLevel.Overlay);
         this.saveState();
-      });
-      return;
-    }
-
-    // Remove any existing active inline editor
-    const existing = this._container.querySelector('.fusion-overlay-inline-editor');
-    if (existing) existing.remove();
-
-    const transformer = this._coordinateTransformer;
-    const dataStore = this._dataStore;
-    const isTag = overlay.annotation?.kind === 'tag';
-    const isArrow = overlay.annotation?.kind === 'arrow';
-
-    let targetX = 0;
-    let targetY = 0;
-
-    if (overlay.points.length >= 2) {
-      targetX = transformer.timestampToXUnbounded(overlay.points[1].timestamp, dataStore);
-      targetY = transformer.priceToY(overlay.points[1].value);
-    } else if (overlay.points.length >= 1) {
-      targetX = transformer.timestampToXUnbounded(overlay.points[0].timestamp, dataStore);
-      targetY = transformer.priceToY(overlay.points[0].value) + (isTag ? -28 : isArrow ? 24 : 0);
-    }
-
-    const screenLeft = targetX + this._leftYAxisWidth;
-    const screenTop = targetY + (this._toolbarHeight + this._topXHeight);
-
-    const input = document.createElement('input');
-    input.className = 'fusion-overlay-inline-editor';
-    input.type = 'text';
-    input.value = overlay.text || (isTag && overlay.points[0] ? overlay.points[0].value.toFixed(2) : isArrow ? 'Signal' : 'Text');
-
-    Object.assign(input.style, {
-      position: 'absolute',
-      left: `${screenLeft}px`,
-      top: `${screenTop}px`,
-      transform: 'translate(-50%, -50%)',
-      zIndex: '99999',
-      background: overlay.color || '#2962ff',
-      color: '#ffffff',
-      font: `600 12px ${this._options.layout.fontFamily}`,
-      padding: '4px 10px',
-      border: '2px solid rgba(255, 255, 255, 0.95)',
-      borderRadius: '4px',
-      outline: 'none',
-      boxShadow: '0 4px 16px rgba(0, 0, 0, 0.5)',
-      textAlign: 'center',
-      minWidth: '60px',
-      maxWidth: '240px',
-      cursor: 'text',
-      pointerEvents: 'auto',
-    });
-
-    input.addEventListener('pointerdown', (e: PointerEvent) => {
-      e.stopPropagation();
-    });
-
-    input.addEventListener('click', (e: MouseEvent) => {
-      e.stopPropagation();
-    });
-
-    input.addEventListener('dblclick', (e: MouseEvent) => {
-      e.stopPropagation();
-    });
-
-    let isCommitted = false;
-    const commit = () => {
-      if (isCommitted) return;
-      isCommitted = true;
-      const nextText = input.value.trim();
-      if (nextText !== '') {
-        overlay.text = nextText;
-      }
-      if (input.parentNode) {
-        input.remove();
-      }
-      this.update(InvalidationLevel.Overlay);
-      this.saveState();
+      },
     };
-
-    const cancel = () => {
-      if (isCommitted) return;
-      isCommitted = true;
-      if (input.parentNode) {
-        input.remove();
-      }
-    };
-
-    input.addEventListener('keydown', (e: KeyboardEvent) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        commit();
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        cancel();
-      }
-    });
-
-    input.addEventListener('blur', commit);
-    this._container.appendChild(input);
-    requestAnimationFrame(() => {
-      // The editor can be gone by the next frame: committed, cancelled, or the
-      // chart destroyed. Focusing a detached input would do nothing useful.
-      if (!input.isConnected) return;
-      input.focus();
-      input.select();
-    });
   }
 
   // ── Drawing tools ────────────────────────────────────────────────────────
@@ -1859,13 +1629,13 @@ export class FusionCandlestickChart {
     this._preparePaneTransformer(this._panes.find(pane => pane.getId() === paneId) ?? this._panes[0]);
     const snappedPoint = this._resolveDrawingPoint(chartX, chartY, paneId);
 
-    const activeDrawing = this._parseDrawingMode(this._activeDrawingType);
-    const requiredPointCount = this._getRequiredDrawingPointCount(this._activeDrawingType);
+    const activeDrawing = parseDrawingMode(this._activeDrawingType);
+    const requiredPointCount = requiredDrawingPointCount(this._activeDrawingType, family => this._templateTotalStep(family));
     const drawingPoint = this._getPointFromResolvedDrawingPoint(snappedPoint);
 
     // ── Single-click placement tools ───────────────────────────────────
     if (requiredPointCount === 1 && activeDrawing.family !== 'annotation') {
-      const overlay = this._createDrawingOverlay(this._activeDrawingType, [drawingPoint]);
+      const overlay = createDrawingOverlay(this._activeDrawingType, [drawingPoint], this._drawingDefaults);
       this.createOverlay(overlay);
       this._setSelectedOverlay(overlay);
       this.setDrawingMode(null);
@@ -1885,8 +1655,8 @@ export class FusionCandlestickChart {
         const point1 = { timestamp: ohlcSnap.timestamp, value: imgPrice };
 
         const drawingType = this._activeDrawingType;
-        this._pickImageForAnnotation((dataUrl, img) => {
-          const overlayInput = this._createDrawingOverlay(drawingType, [point0, point1]);
+        pickImageFile((dataUrl, img) => {
+          const overlayInput = createDrawingOverlay(drawingType, [point0, point1], this._drawingDefaults);
           overlayInput.imageUrl = dataUrl;
           overlayInput._imageCache = img;
           const overlay = this.createOverlay(overlayInput);
@@ -1899,7 +1669,7 @@ export class FusionCandlestickChart {
         const tagPrice = transformer.yToPrice(transformer.priceToY(candlePrice) - 44);
         const point0 = { timestamp: ohlcSnap.timestamp, value: candlePrice };
         const point1 = { timestamp: ohlcSnap.timestamp, value: tagPrice };
-        const overlayInput = this._createDrawingOverlay(this._activeDrawingType, [point0, point1]);
+        const overlayInput = createDrawingOverlay(this._activeDrawingType, [point0, point1], this._drawingDefaults);
         overlayInput.text = candlePrice.toFixed(2);
         const overlay = this.createOverlay(overlayInput);
         this._setSelectedOverlay(overlay);
@@ -1919,7 +1689,7 @@ export class FusionCandlestickChart {
         const notePrice = transformer.yToPrice(transformer.priceToY(candlePrice) - 48);
         const point0 = { timestamp: ohlcSnap.timestamp, value: candlePrice };
         const point1 = { timestamp: ohlcSnap.timestamp, value: notePrice };
-        const overlayInput = this._createDrawingOverlay(this._activeDrawingType, [point0, point1]);
+        const overlayInput = createDrawingOverlay(this._activeDrawingType, [point0, point1], this._drawingDefaults);
         overlayInput.text = cfg.label;
         overlayInput.color = cfg.color;
         overlayInput.backgroundColor = cfg.bg;
@@ -1933,7 +1703,7 @@ export class FusionCandlestickChart {
         const notePrice = transformer.yToPrice(transformer.priceToY(candlePrice) + 44);
         const point0 = { timestamp: ohlcSnap.timestamp, value: candlePrice };
         const point1 = { timestamp: ohlcSnap.timestamp, value: notePrice };
-        const overlayInput = this._createDrawingOverlay(this._activeDrawingType, [point0, point1]);
+        const overlayInput = createDrawingOverlay(this._activeDrawingType, [point0, point1], this._drawingDefaults);
         overlayInput.text = 'Signal';
         const overlay = this.createOverlay(overlayInput);
         this._setSelectedOverlay(overlay);
@@ -1944,7 +1714,7 @@ export class FusionCandlestickChart {
         const notePrice = transformer.yToPrice(transformer.priceToY(candlePrice) - 44);
         const point0 = { timestamp: ohlcSnap.timestamp, value: candlePrice };
         const point1 = { timestamp: ohlcSnap.timestamp, value: notePrice };
-        const overlayInput = this._createDrawingOverlay(this._activeDrawingType, [point0, point1]);
+        const overlayInput = createDrawingOverlay(this._activeDrawingType, [point0, point1], this._drawingDefaults);
         overlayInput.text = 'Note';
         const overlay = this.createOverlay(overlayInput);
         this._setSelectedOverlay(overlay);
@@ -1956,7 +1726,7 @@ export class FusionCandlestickChart {
 
     // ── Standard two/three-point drawing tools ────────────────────────
     if (!this._isCreatingOverlay) {
-      this._drawingOverlay = this._createDrawingOverlay(this._activeDrawingType, [drawingPoint, drawingPoint]);
+      this._drawingOverlay = createDrawingOverlay(this._activeDrawingType, [drawingPoint, drawingPoint], this._drawingDefaults);
       if (!this._runDrawStep(this._drawingOverlay, drawingPoint, 0)) {
         this._drawingOverlay = null;
         return;
@@ -3583,64 +3353,16 @@ export class FusionCandlestickChart {
   }
 
   public async takeScreenshot(): Promise<string> {
-    const dpr = window.devicePixelRatio || 1;
-    const finalCanvas = document.createElement('canvas');
-    const width = this._container.clientWidth;
     const height = this._container.clientHeight;
-    finalCanvas.width = width * dpr;
-    finalCanvas.height = height * dpr;
-    const ctx = finalCanvas.getContext('2d');
-    if (!ctx) return '';
-
-    // `drawImage` throws on a zero-sized source (an inactive Y-axis rail keeps a
-    // 0-width canvas), so every blit goes through this guard.
-    const blit = (source: HTMLCanvasElement | null | undefined, x: number, y: number) => {
-      if (source && source.width > 0 && source.height > 0) ctx.drawImage(source, x, y);
-    };
-
-    // Draw background
-    ctx.fillStyle = this._options.layout.background.color;
-    ctx.fillRect(0, 0, finalCanvas.width, finalCanvas.height);
-
-    // Render all panes
-    for (const pane of this._panes) {
-      const paneBounding = pane.getBounding();
-      const top = paneBounding.top * dpr;
-      
-      const layers: Array<'grid' | 'main' | 'overlay'> = ['grid', 'main', 'overlay'];
-      for (const layer of layers) {
-        // Chart Area
-        const chartCanvas = pane.getCanvas(layer, 'chart');
-        if (chartCanvas) {
-          const left = Number.parseFloat(chartCanvas.style.left || '0') * dpr;
-          blit(chartCanvas, left, top);
-        }
-        // Y Axes
-        (['leftYAxis', 'rightYAxis'] as const).forEach(area => {
-          const axisCanvas = pane.getCanvas(layer, area);
-          if (axisCanvas) {
-            const left = Number.parseFloat(axisCanvas.style.left || '0') * dpr;
-            blit(axisCanvas, left, top);
-          }
-        });
-      }
-    }
-
-    // Render X-Axis Rulers
-    const drawX = (canvases: Map<string, HTMLCanvasElement>, topOffset: number) => {
-      ['grid', 'overlay'].forEach(layer => {
-        const canvas = canvases.get(layer);
-        if (canvas) {
-          const left = Number.parseFloat(canvas.style.left || '0') * dpr;
-          blit(canvas, left, topOffset * dpr);
-        }
-      });
-    };
-    
-    if (this._topXHeight > 0) drawX(this._topXAxisCanvases, this._toolbarHeight);
-    if (this._bottomXHeight > 0) drawX(this._bottomXAxisCanvases, height - this._bottomXHeight);
-
-    return finalCanvas.toDataURL('image/png');
+    return composeScreenshot({
+      width: this._container.clientWidth,
+      height,
+      devicePixelRatio: window.devicePixelRatio || 1,
+      background: this._options.layout.background.color,
+      panes: this._panes,
+      topRuler: this._topXHeight > 0 ? { canvases: this._topXAxisCanvases, top: this._toolbarHeight } : null,
+      bottomRuler: this._bottomXHeight > 0 ? { canvases: this._bottomXAxisCanvases, top: height - this._bottomXHeight } : null,
+    });
   }
 
   public toggleFullScreen() {

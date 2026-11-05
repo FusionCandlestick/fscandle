@@ -60,7 +60,7 @@ assert.equal(packageManifest.dependencies?.['lightweight-charts'], undefined);
 
 [
   '_drawingFixedPointCount',
-  '_getRequiredDrawingPointCount',
+  'requiredDrawingPointCount',
 ].forEach(contract => assert.match(chart, new RegExp(contract)));
 
 [
