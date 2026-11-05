@@ -19,7 +19,7 @@
 The project is pre-1.0.
 
 ```bash
-git tag v0.1.2
+git tag v0.1.3
 ```
 
 ## Publishing to npm

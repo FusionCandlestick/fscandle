@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-11-05
+
 ### Changed
 
 - Live updates no longer recompute every indicator over the whole series.
@@ -206,6 +208,7 @@ yet pluggable, visual regression is a single baseline rather than a matrix, and
 the indicator catalog is narrower than KLineCharts'. See the "Known Gaps"
 section of [README.md](README.md).
 
+[0.1.3]: https://github.com/FusionCandlestick/fscandle/releases/tag/v0.1.3
 [0.1.2]: https://github.com/FusionCandlestick/fscandle/releases/tag/v0.1.2
 [0.1.1]: https://github.com/FusionCandlestick/fscandle/releases/tag/v0.1.1
 [0.1.0]: https://github.com/FusionCandlestick/fscandle/releases/tag/v0.1.0
