@@ -28,6 +28,8 @@ import { HeikinAshiSeries } from './engine/HeikinAshiSeries';
 import { OverlayManager, Overlay, OverlayPoint, OverlayTemplate } from './engine/OverlayManager';
 import { openOverlayTextEditor, pickImageFile } from './gui/OverlayTextEditor';
 import { composeScreenshot } from './renderer/screenshot';
+import { drawIndicatorPane, drawPricePane } from './renderer/paneRenderers';
+import type { PaneContexts, PaneDrawHost, PaneRedraw, PricePaneDrawHost } from './renderer/paneRenderers';
 import { buildLegendContent, buildToolbarContentItems } from './gui/contentModel';
 import type { SeriesColorOptions } from './gui/contentModel';
 import { createDrawingOverlay, parseDrawingMode, requiredDrawingPointCount } from './engine/drawingModes';
@@ -92,19 +94,12 @@ import {
   getPaddedPriceRange,
 } from './model/priceScaleMath';
 import { ChromeRenderer } from './renderer/ChromeRenderer';
-import { renderMainPaneCrosshair } from './renderer/mainPaneCrosshair';
-import { renderSeriesBeacons } from './renderer/seriesBeacons';
-import { renderSessionSeparators } from './renderer/sessionSeparators';
-import { renderIndicatorCrosshair } from './renderer/indicatorCrosshair';
 import { indicatorPaneRange } from './model/indicatorRange';
 import { sanitizeOverlays } from './model/overlayValidation';
 import { createId } from './model/ids';
 import { renderSeriesValueTags, renderValueTag } from './renderer/axisTags';
 import {
-  renderLastPriceLine,
   renderPriceLineLabels,
-  renderPriceLines,
-  renderSeriesMarkers,
 } from './engine/decorationRenderer';
 import {
   formatToolbarLabel,
@@ -133,15 +128,6 @@ type PaneAxisSide = 'left' | 'right';
  * Gathered once per pane per frame instead of seven `getContext` calls and a
  * seven-way null check inline in the render pass.
  */
-interface PaneContexts {
-  chart: CanvasRenderingContext2D;
-  grid: CanvasRenderingContext2D;
-  overlay: CanvasRenderingContext2D;
-  leftAxisGrid: CanvasRenderingContext2D;
-  leftAxisOverlay: CanvasRenderingContext2D;
-  rightAxisGrid: CanvasRenderingContext2D;
-  rightAxisOverlay: CanvasRenderingContext2D;
-}
 type ConfigurablePriceSeriesStyle = 'candle' | 'bar' | 'area' | 'line' | 'step' | 'baseline' | 'hollow' | 'ha';
 
 /** A price scale resolved against a plot size, ready to be drawn. */
@@ -3716,8 +3702,7 @@ export class FusionCandlestickChart {
     contexts: PaneContexts,
     data: KLineData[],
   ) {
-    const { id: paneId, bounding, plotWidth: realWidth, plotHeight: realHeight, level } = paneFrame;
-    const { chart: ctx, grid: gridCtx, overlay: overlayCtx } = contexts;
+    const { plotWidth: realWidth, plotHeight: realHeight } = paneFrame;
 
     // Compute the price scales, commit what they derived, then draw them. These
     // used to be one chained expression, so a render pass was also the only
@@ -3736,144 +3721,71 @@ export class FusionCandlestickChart {
     this._coordinateTransformer.setRange(primaryRange.min, primaryRange.max);
     this._applyYTransform();
 
-    // The rulers are shared, so they follow the frame's level, not this pane's.
-    if (this._options.timeScale.visible !== false && frame.level >= InvalidationLevel.Light) {
-      const rulerBounds = { width: realWidth, height: this._xAxisHeight, left: this._leftYAxisWidth, top: 0 };
-      if (this._topXHeight > 0) {
-        const topXCtx = this._topXAxisCanvases.get('grid')!.getContext('2d')!;
-        this._xAxis.render(topXCtx, primaryScale.transformer, rulerBounds, 'top', this._dataStore);
-      }
-      if (this._bottomXHeight > 0) {
-        const bottomXCtx = this._bottomXAxisCanvases.get('grid')!.getContext('2d')!;
-        this._xAxis.render(bottomXCtx, primaryScale.transformer, rulerBounds, 'bottom', this._dataStore);
-      }
-    }
-
-    if (level >= InvalidationLevel.Light) {
-      this._chrome.drawWatermark(gridCtx, realWidth, realHeight);
-      renderSessionSeparators(gridCtx, this._options.timeScale.sessionSeparator, this._session, data, realWidth, realHeight, primaryScale.transformer);
-      // Grid rendering is handled by GridPrimitive.
-      this._drawPrimitivePaneViews(gridCtx, paneId, 'grid', 'chart', bounding, { ...bounding, width: realWidth }, primaryScale.transformer);
-
-      if (this._options.axis.visible !== false) {
-        if (this._options.axis.dual) {
-          // Draw left Y-axis (e.g. Percentage)
-          const leftGridCtx = contexts.leftAxisGrid;
-          this._drawPriceColumn(leftGridCtx, 'left', 0, realHeight, primaryScale.transformer);
-
-          // Draw right Y-axis (e.g. Dollar Price)
-          const rightGridCtx = contexts.rightAxisGrid;
-          this._drawPriceColumn(rightGridCtx, 'right', 0, realHeight, primaryScale.transformer);
-        } else {
-          priceScales.forEach(scale => {
-            if (this._hiddenSeriesIds.has(scale.id)) return;
-            const axisGridCtx = scale.side === 'left' ? contexts.leftAxisGrid : contexts.rightAxisGrid;
-            this._drawPriceColumn(axisGridCtx, scale.side, scale.axisIndex, realHeight, scale.transformer);
-          });
-        }
-      }
-
-      priceScales.forEach(scale => {
-        if (this._hiddenSeriesIds.has(scale.id)) return;
-        scale.series.render(ctx, scale.transformer);
-      });
-
-      this._series
-        .filter(series => series !== this._mainSeries)
-        .forEach(series => series.render(ctx, primaryScale.transformer));
-
-      renderSeriesBeacons(ctx, this._series, primaryScale.transformer, realWidth, realHeight);
-
-      if (this._options.axis.lastPriceLineVisible !== false) {
-        renderLastPriceLine(ctx, realWidth, primaryScale.transformer, data);
-      }
-      renderPriceLines(ctx, realWidth, primaryScale.transformer, this._priceLines.all());
-      renderSeriesMarkers(ctx, data, primaryScale.transformer, this._seriesMarkers.all(), this._options.layout.fontFamily);
-      if (this._options.axis.showExtremes !== false) {
-        this._chrome.drawExtremes(ctx, {
-          data,
-          transformer: this._coordinateTransformer,
-          chartWidth: frame.width,
-          formatPrice: price => this._formatPriceValue(price),
-        });
-      }
-      this._drawPrimitivePaneViews(ctx, paneId, 'main', 'chart', bounding, { ...bounding, width: realWidth }, primaryScale.transformer);
-
-      this._indicatorManager.render(paneId, {
-        ctx,
-        transformer: primaryScale.transformer,
-        bounding: { ...bounding, width: realWidth },
-        dataList: data,
-      });
-    }
-
-    if (level >= InvalidationLevel.Cursor) {
-      this._drawPrimitivePaneViews(overlayCtx, paneId, 'overlay', 'chart', bounding, { ...bounding, width: realWidth }, primaryScale.transformer);
-      const rulerBounds = { width: realWidth, height: this._xAxisHeight, left: this._leftYAxisWidth, top: 0 };
-      if (this._topXHeight > 0) {
-        this._drawPrimitiveTimeAxisViews(
-          this._topXAxisCanvases.get('overlay')!.getContext('2d')!,
-          'top',
-          rulerBounds,
-          primaryScale.transformer,
-        );
-      }
-      if (this._bottomXHeight > 0) {
-        this._drawPrimitiveTimeAxisViews(
-          this._bottomXAxisCanvases.get('overlay')!.getContext('2d')!,
-          'bottom',
-          rulerBounds,
-          primaryScale.transformer,
-        );
-      }
-    }
-
-    renderMainPaneCrosshair({
-      canvases: {
-        overlay: overlayCtx,
-        leftAxisOverlay: contexts.leftAxisOverlay,
-        rightAxisOverlay: contexts.rightAxisOverlay,
-        topXOverlay: this._topXAxisCanvases.get('overlay')!.getContext('2d')!,
-        bottomXOverlay: () => this._bottomXAxisCanvases.get('overlay')!.getContext('2d')!,
-      },
-      scales: priceScales,
-      primaryTransformer: primaryScale.transformer,
-      pane: { bounding, width: realWidth, height: realHeight, isBottom: paneFrame.isLast },
-      geometry: { toolbarHeight: this._toolbarHeight, topXAxisHeight: this._topXHeight, xAxisHeight: this._xAxisHeight, leftYAxisWidth: this._leftYAxisWidth },
-      crosshair: this._crosshairPos || this._remoteCrosshairPos,
-      style: { visible: this._options.crosshair.visible, color: this._options.crosshair.color, style: this._options.crosshair.style },
-      isHidden: id => this._hiddenSeriesIds.has(id),
+    drawPricePane({
+      paneFrame,
+      frameWidth: frame.width,
+      redraw: this._paneRedraw(paneFrame, frame),
+      contexts,
       data,
+      priceScales,
+      primaryScale,
+    }, this._createPricePaneDrawHost());
+  }
+
+  /** Which parts of a pane this frame redraws. */
+  private _paneRedraw(paneFrame: PaneFrame, frame: ChartFrame): PaneRedraw {
+    return {
+      rulers: frame.level >= InvalidationLevel.Light,
+      body: paneFrame.level >= InvalidationLevel.Light,
+      cursor: paneFrame.level >= InvalidationLevel.Cursor,
+    };
+  }
+
+  /** What drawing any pane needs from this chart. */
+  private _createPaneDrawHost(): PaneDrawHost {
+    const rulers = { top: this._topXAxisCanvases, bottom: this._bottomXAxisCanvases };
+    return {
+      options: this._options,
       chrome: this._chrome,
       yAxis: this._yAxis,
       xAxis: this._xAxis,
+      geometry: {
+        toolbarHeight: this._toolbarHeight,
+        topXAxisHeight: this._topXHeight,
+        bottomXAxisHeight: this._bottomXHeight,
+        xAxisHeight: this._xAxisHeight,
+        leftYAxisWidth: this._leftYAxisWidth,
+      },
+      rulerContext: (position, layer) => rulers[position].get(layer)!.getContext('2d')!,
+      drawPaneViews: (ctx, paneId, layer, bounding, viewport, transformer) =>
+        this._drawPrimitivePaneViews(ctx, paneId, layer, 'chart', bounding, viewport, transformer),
+      drawPriceAxisViews: (ctx, paneId, side, axisIndex, bounding, transformer) =>
+        this._drawPrimitivePriceAxisViews(ctx, paneId, side, axisIndex, bounding, transformer),
+      drawPriceColumn: (ctx, side, axisIndex, height, transformer) => this._drawPriceColumn(ctx, side, axisIndex, height, transformer),
       withAxisColumn: (ctx, side, axisIndex, height, draw) => this._withAxisColumn(ctx, side, axisIndex, height, draw),
+      renderIndicators: (paneId, params) => this._indicatorManager.render(paneId, params),
       formatPrice: price => this._formatPriceValue(price),
-      formatTime: timestamp => this._formatTimeValue(timestamp, 'crosshair'),
-    });
+      formatCrosshairTime: timestamp => this._formatTimeValue(timestamp, 'crosshair'),
+    };
+  }
 
-    if (this._options.axis.visible !== false) {
-      if (this._options.axis.dual) {
-        this._renderDualAxisTags(contexts, primaryScale, data, realHeight);
-      } else {
-        priceScales.forEach(scale => {
-          if (this._hiddenSeriesIds.has(scale.id)) return;
-          const axisOverlayCtx = scale.side === 'left' ? contexts.leftAxisOverlay : contexts.rightAxisOverlay;
-          this._withAxisColumn(axisOverlayCtx, scale.side, scale.axisIndex, realHeight, axisBounds => {
-            this._renderLastPriceTag(axisOverlayCtx, axisBounds, scale.id, scale.side, scale.transformer);
-            if (scale.isPrimary) {
-              renderPriceLineLabels(axisOverlayCtx, axisBounds, scale.side, scale.transformer, this._priceLines.all(), this._yAxis, price => this._formatPriceValue(price));
-              renderSeriesValueTags(axisOverlayCtx, this._yAxis, axisBounds, scale.transformer, this._secondarySeries(), {
-                side: scale.side,
-                fallbackColor: '#2962ff',
-                text: close => this._formatPriceValue(close),
-              });
-            }
-            this._drawPrimitivePriceAxisViews(axisOverlayCtx, paneId, scale.side, scale.axisIndex, axisBounds, scale.transformer);
-          });
-        });
-      }
-    }
+  private _createPricePaneDrawHost(): PricePaneDrawHost {
+    return {
+      ...this._createPaneDrawHost(),
+      dataStore: this._dataStore,
+      mainTransformer: this._coordinateTransformer,
+      series: this._series,
+      mainSeries: this._mainSeries,
+      hidden: this._hiddenSeriesIds,
+      priceLines: this._priceLines.all(),
+      markers: this._seriesMarkers.all(),
+      session: this._session,
+      crosshair: this._crosshairPos || this._remoteCrosshairPos,
+      secondarySeries: () => this._secondarySeries(),
+      drawTimeAxisViews: (ctx, position, bounding, transformer) => this._drawPrimitiveTimeAxisViews(ctx, position, bounding, transformer),
+      renderDualAxisTags: (contexts, primaryScale, data, height) => this._renderDualAxisTags(contexts, primaryScale, data, height),
+      renderLastPriceTag: (ctx, bounding, scaleId, side, transformer) => this._renderLastPriceTag(ctx, bounding, scaleId, side, transformer),
+    };
   }
 
   /** One price column's background and its tick labels, for the given transformer. */
@@ -3893,7 +3805,7 @@ export class FusionCandlestickChart {
   /** Dual axes label the main series on both sides, each side with its own formatter. */
   private _renderDualAxisTags(
     contexts: PaneContexts,
-    primaryScale: PriceScaleFrame,
+    primaryScale: { transformer: CoordinateTransformer },
     data: KLineData[],
     realHeight: number,
   ) {
@@ -3946,10 +3858,7 @@ export class FusionCandlestickChart {
     contexts: PaneContexts,
     data: KLineData[],
   ) {
-    const { id: paneId, bounding, plotWidth: realWidth, plotHeight: realHeight, level, axisSide: paneSide } = paneFrame;
-    const { chart: ctx, grid: gridCtx, overlay: overlayCtx } = contexts;
-    const axisGridCtx = paneSide === 'left' ? contexts.leftAxisGrid : contexts.rightAxisGrid;
-    const axisOverlayCtx = paneSide === 'left' ? contexts.leftAxisOverlay : contexts.rightAxisOverlay;
+    const { id: paneId, plotWidth: realWidth, plotHeight: realHeight } = paneFrame;
 
     // This pane's own transformer. It used to be the chart's shared one, which
     // left the shared instance holding an indicator's range (RSI's 0-100, say)
@@ -3980,70 +3889,20 @@ export class FusionCandlestickChart {
     transformer.setYScale(state.scale);
     transformer.setYOffset(state.offset);
 
-    // The time rulers are shared and drawn once per frame by the main pane, which
-    // is rendered on every frame. Each indicator pane used to draw them again
-    // over the same pixels.
-
-    if (level >= InvalidationLevel.Light) {
-      // Grid rendering is handled by GridPrimitive.
-      this._drawPrimitivePaneViews(gridCtx, paneId, 'grid', 'chart', bounding, { ...bounding, width: realWidth }, transformer);
-
-      if (this._options.axis.visible !== false) {
-        this._drawPriceColumn(axisGridCtx, paneSide, 0, realHeight, transformer);
-      }
-
-      this._indicatorManager.render(paneId, {
-        ctx,
-        transformer: transformer,
-        bounding: { ...bounding, width: realWidth },
-        dataList: data,
-      });
-      this._drawCustomPane(paneId, ctx, {
+    drawIndicatorPane({
+      paneFrame,
+      redraw: this._paneRedraw(paneFrame, frame),
+      contexts,
+      data,
+      transformer,
+      drawCustomBody: ctx => this._drawCustomPane(paneId, ctx, {
         width: realWidth,
         height: realHeight,
         transformer,
         data,
         visibleRange: { from: leftIdx, to: rightIdx },
-      });
-      this._drawPrimitivePaneViews(ctx, paneId, 'main', 'chart', bounding, { ...bounding, width: realWidth }, transformer);
-    }
-
-    if (level >= InvalidationLevel.Cursor) {
-      this._drawPrimitivePaneViews(overlayCtx, paneId, 'overlay', 'chart', bounding, { ...bounding, width: realWidth }, transformer);
-    }
-
-    // Whether the crosshair is in this pane, and where, is the frame's answer:
-    // the conversion used to be written out here against the pane's offset from
-    // the plot origin.
-    const crosshair = paneFrame.crosshair;
-    if (crosshair) {
-      renderIndicatorCrosshair({
-        overlay: overlayCtx,
-        axisOverlay: axisOverlayCtx,
-        side: paneSide,
-        isLast: paneFrame.isLast,
-        transformer,
-        crosshair,
-        realWidth,
-        realHeight,
-        xAxisHeight: this._xAxisHeight,
-        leftYAxisWidth: this._leftYAxisWidth,
-        style: { visible: this._options.crosshair.visible, color: this._options.crosshair.color, style: this._options.crosshair.style },
-        data,
-        topRuler: this._topXHeight > 0 ? this._topXAxisCanvases.get('overlay')!.getContext('2d')! : null,
-        bottomRuler: this._bottomXHeight > 0 ? this._bottomXAxisCanvases.get('overlay')!.getContext('2d')! : null,
-        chrome: this._chrome,
-        yAxis: this._yAxis,
-        xAxis: this._xAxis,
-        withAxisColumn: (ctx, side, axisIndex, height, draw) => this._withAxisColumn(ctx, side, axisIndex, height, draw),
-        formatPrice: price => this._formatPriceValue(price),
-        formatTime: timestamp => this._formatTimeValue(timestamp, 'crosshair'),
-      });
-    }
-
-    this._withAxisColumn(axisOverlayCtx, paneSide, 0, realHeight, axisBounds => {
-      this._drawPrimitivePriceAxisViews(axisOverlayCtx, paneId, paneSide, 0, axisBounds, transformer);
-    });
+      }),
+    }, this._createPaneDrawHost());
   }
 
   /** Fill a y-axis column canvas with a tinted background and an inner border line. */
